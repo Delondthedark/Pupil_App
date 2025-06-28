@@ -1,0 +1,49 @@
+# Node.js
+node_modules/
+npm-debug.log
+.env
+dist/
+build/
+
+# React (frontend)
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# Python (AI service)
+ai-service/__pycache__/
+ai-service/.env
+ai-service/.pytest_cache/
+ai-service/.mypy_cache/
+*.py[cod]
+
+# VSCode & MacOS
+.vscode/
+.DS_Store
+
+# OS / Editor junk
+Thumbs.db
+.idea/
+*.swp
+
+# PostgreSQL (optional if using local DB dumps)
+*.sql
+*.dump
+
+# Logs
+logs/
+*.log
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Uvicorn & FastAPI cache
+*.db
+__pycache__/
+
+# Coverage reports
+coverage/
+htmlcov/
+.cache/
