@@ -6,14 +6,14 @@ const AppLayout = () => {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
-const tabs = [
-
-  { label: 'Pupil Size', path: '/pupil' },
-  { label: 'Sleep Analysis', path: '/sleep' },
-  { label: 'Food Analysis', path: '/food' },
-  { label: 'Gaze Pattern', path: '/fixation' },
-  { label: 'PLR Test', path: '/plr' },
-];
+  const tabs = [
+    { label: 'Pupil Size', path: '/pupil' },
+    { label: 'Sleep Analysis', path: '/sleep' },
+    { label: 'Food Analysis', path: '/food' },
+    { label: 'Gaze Pattern', path: '/fixation' },
+    { label: 'PLR Test', path: '/plr' },
+    { label: 'Eye Direction', path: '/eye-direction' }, // ✅ New tab
+  ];
 
   const handleNavigate = (path) => {
     navigate(path);
@@ -22,7 +22,6 @@ const tabs = [
 
   return (
     <div style={styles.appContainer}>
-      {/* Header */}
       <header style={styles.header}>
         <h1
           style={styles.headerTitle}
@@ -57,7 +56,6 @@ const tabs = [
         )}
       </header>
 
-      {/* Content */}
       <main style={styles.mainContent}>
         <Outlet />
       </main>
@@ -76,7 +74,7 @@ const styles = {
   },
   header: {
     position: 'relative',
-    padding: '0.5rem 1rem', // Reduced padding
+    padding: '0.5rem 1rem',
     borderBottom: '1px solid #eee',
     backgroundColor: '#fff',
     display: 'flex',

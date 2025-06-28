@@ -22,14 +22,14 @@ export default function FoodAnalysis() {
     formData.append('image', selectedFile);
 
     try {
-      const res = await fetch('https://trying-motors-mb-infected.trycloudflare.com/api/food/upload', {
+      const res = await fetch('https://separated-ringtones-inner-creatures.trycloudflare.com/api/food/upload', {
         method: 'POST',
         body: formData,
       });
       const result = await res.json();
       console.log('📤 Enqueue response:', result);
 
-      await fetch('https://trying-motors-mb-infected.trycloudflare.com/api/queue/enqueue', {
+      await fetch('https://separated-ringtones-inner-creatures.trycloudflare.com/api/queue/enqueue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: result.imageUrl }),
@@ -48,7 +48,7 @@ export default function FoodAnalysis() {
   const fetchResults = async () => {
     setLoadingResults(true);
     try {
-      const res = await fetch('https://trying-motors-mb-infected.trycloudflare.com/api/queue/results');
+      const res = await fetch('https://separated-ringtones-inner-creatures.trycloudflare.com/api/queue/results');
       const items = await res.json();
       setData(items);
     } catch (err) {

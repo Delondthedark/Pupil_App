@@ -17,7 +17,7 @@ const SleepAnalysis = () => {
   const [sleepData, setSleepData] = useState([]);
 
   useEffect(() => {
-    fetch('https://running-currency-rendering-ant.trycloudflare.com/api/sleep')
+    fetch('https://separated-ringtones-inner-creatures.trycloudflare.com/api/sleep')
       .then(response => response.json())
       .then(data => {
         if (Array.isArray(data)) {
