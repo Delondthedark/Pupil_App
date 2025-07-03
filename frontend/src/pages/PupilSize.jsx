@@ -53,7 +53,7 @@ const PupilSize = () => {
         formData.append('file', blob, 'frame.jpg');
 
         try {
-          const res = await fetch('https://stephen-working-tue-speed.trycloudflare.com/analyze/', {
+          const res = await fetch('https://dates-equity-attempts-metadata.trycloudflare.com/analyze/', {
             method: 'POST',
             body: formData,
           });

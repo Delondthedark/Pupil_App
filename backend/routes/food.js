@@ -15,8 +15,8 @@ const upload = multer({ storage });
 
 router.post('/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-  const imageUrl = `https://separated-ringtones-inner-creatures.trycloudflare.com/uploads/${req.file.filename}`;
+a
+  const imageUrl = `https://dumb-addresses-appear-seemed.trycloudflare.com/uploads/${req.file.filename}`;
   console.log('📸 Image enqueued:', imageUrl);
 
   // Optional enqueue here

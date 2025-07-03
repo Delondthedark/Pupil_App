@@ -17,7 +17,7 @@ const SleepAnalysis = () => {
   const [sleepData, setSleepData] = useState([]);
 
   useEffect(() => {
-    fetch('https://separated-ringtones-inner-creatures.trycloudflare.com/api/sleep')
+    fetch('https://dumb-addresses-appear-seemed.trycloudflare.com/api/sleep')
       .then(response => response.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -65,8 +65,8 @@ const SleepAnalysis = () => {
   };
 
   const containerStyle = {
-    padding: '40px 20px',
-    maxWidth: '1000px',
+    padding: '20px 10px',
+    maxWidth: '100%',
     margin: '0 auto',
     fontFamily: 'Segoe UI, sans-serif'
   };
@@ -74,8 +74,8 @@ const SleepAnalysis = () => {
   const headingStyle = {
     textAlign: 'center',
     color: '#0d6efd',
-    fontSize: '2rem',
-    marginBottom: '30px'
+    fontSize: 'clamp(1.5rem, 5vw, 2rem)',
+    marginBottom: '20px'
   };
 
   const tableContainerStyle = {
@@ -89,8 +89,9 @@ const SleepAnalysis = () => {
 
   const tableStyle = {
     width: '100%',
+    minWidth: '600px',
     borderCollapse: 'collapse',
-    fontSize: '0.95rem'
+    fontSize: '0.9rem'
   };
 
   const thStyle = {
@@ -136,9 +137,7 @@ const SleepAnalysis = () => {
   const chartOptions = {
     responsive: true,
     plugins: {
-      legend: {
-        position: 'top'
-      },
+      legend: { position: 'top' },
       title: {
         display: true,
         text: 'Sleep Stage Duration (minutes per day)'
@@ -186,18 +185,23 @@ const SleepAnalysis = () => {
             </table>
           </div>
 
-          <Bar data={chartData} options={chartOptions} />
+          <div style={{ width: '100%', overflowX: 'auto', marginTop: '2rem' }}>
+            <Bar data={chartData} options={chartOptions} />
+          </div>
 
           <div style={{ textAlign: 'center', marginTop: '40px' }}>
             <button
               onClick={exportCSV}
               style={{
-                padding: '10px 20px',
+                padding: '12px 24px',
+                fontSize: '1rem',
                 borderRadius: '6px',
                 border: 'none',
                 background: '#0d6efd',
                 color: 'white',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                width: '90%',
+                maxWidth: '300px'
               }}
             >
               ⬇️ Download CSV

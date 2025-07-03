@@ -31,68 +31,105 @@ RIGHT_EYE = [362, 263, 386, 374]
 LEFT_IRIS = [468, 469, 470, 471]
 RIGHT_IRIS = [473, 474, 475, 476]
 
-def calculate_iris_diameter(landmarks, indices, w, h):
-    pts = [(int(landmarks[idx].x * w), int(landmarks[idx].y * h)) for idx in indices]
-    if len(pts) >= 4:
-        return float(np.linalg.norm(np.array(pts[1]) - np.array(pts[3])))
-    return 0.0
-
-@app.post("/analyze/")
-async def analyze(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
-
-    if image is None:
-        return JSONResponse(content={"error": "Invalid image"}, status_code=400)
-
-    image = cv2.flip(image, 1)
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb)
-
-    left_size, right_size = 0.0, 0.0
-    if results.multi_face_landmarks:
-        for landmarks in results.multi_face_landmarks:
-            h, w, _ = image.shape
-
-            for idx in LEFT_IRIS:
-                pt = landmarks.landmark[idx]
-                cv2.circle(image, (int(pt.x * w), int(pt.y * h)), 2, (0, 255, 0), -1)
-            for idx in RIGHT_IRIS:
-                pt = landmarks.landmark[idx]
-                cv2.circle(image, (int(pt.x * w), int(pt.y * h)), 2, (255, 0, 0), -1)
-
-            left_size = calculate_iris_diameter(landmarks.landmark, LEFT_IRIS, w, h)
-            right_size = calculate_iris_diameter(landmarks.landmark, RIGHT_IRIS, w, h)
-
-    _, buffer = cv2.imencode(".jpg", image)
-    image_base64 = base64.b64encode(buffer).decode("utf-8")
-    return {
-        "left_pupil_size": left_size,
-        "right_pupil_size": right_size,
-        "annotated_image": f"data:image/jpeg;base64,{image_base64}"
-    }
-
-
 def get_eye_center(landmarks, eye_indices, shape):
     h, w = shape
     pts = [(int(landmarks[idx].x * w), int(landmarks[idx].y * h)) for idx in eye_indices]
     return np.mean(pts, axis=0), pts
+
 
 def get_iris_center(landmarks, iris_indices, shape):
     h, w = shape
     pts = [(int(landmarks[idx].x * w), int(landmarks[idx].y * h)) for idx in iris_indices]
     return np.mean(pts, axis=0)
 
-def draw_gaze_vector(frame, eye_center, gaze_vector, length=30, color=(0, 0, 255)):
-    start = (int(eye_center[0]), int(eye_center[1]))
+def get_blink_ratio(eye_pts):
+    vertical = np.linalg.norm(eye_pts[2] - eye_pts[3])  # top-bottom
+    horizontal = np.linalg.norm(eye_pts[0] - eye_pts[1])  # outer-inner
+    return vertical / horizontal if horizontal else 0
+
+def draw_arrow(frame, start, direction, label, color=(255, 0, 0)):
     end = (
-        int(start[0] + gaze_vector[0] * length),
-        int(start[1] + gaze_vector[1] * length)
+        int(start[0] + direction[0] * 30),
+        int(start[1] + direction[1] * 30)
     )
-    cv2.arrowedLine(frame, start, end, color, 2, tipLength=0.3)
+    if np.linalg.norm(direction) < 2:  # Considered "center"
+        cv2.circle(frame, (int(start[0]), int(start[1])), 6, (0, 255, 0), -1)
+    else:
+        cv2.arrowedLine(frame, (int(start[0]), int(start[1])), end, color, 2, tipLength=0.3)
+        cv2.putText(frame, label, (int(start[0]) - 10, int(start[1]) - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+def classify_direction(dx, dy):
+    if abs(dx) < 1.5 and abs(dy) < 1.5:
+        return "center"
+    if abs(dx) > abs(dy):
+        return "right" if dx > 0 else "left"
+    else:
+        return "down" if dy > 0 else "up"
 
 @app.post("/eye_direction/")
 async def eye_direction(file: UploadFile = File(...)):
+    contents = await file.read()
+    image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return JSONResponse(content={"error": "Invalid image"}, status_code=400)
+
+    image = cv2.flip(image, 1)
+    h, w, _ = image.shape
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb)
+
+    direction = "undetected"
+
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            left_eye_center, left_eye_pts = get_eye_center(face_landmarks.landmark, LEFT_EYE, (h, w))
+            right_eye_center, right_eye_pts = get_eye_center(face_landmarks.landmark, RIGHT_EYE, (h, w))
+            left_iris_center = get_iris_center(face_landmarks.landmark, LEFT_IRIS, (h, w))
+            right_iris_center = get_iris_center(face_landmarks.landmark, RIGHT_IRIS, (h, w))
+
+            left_eye_pts_arr = np.array(left_eye_pts)
+            right_eye_pts_arr = np.array(right_eye_pts)
+
+            # Blink detection
+            left_ratio = get_blink_ratio(left_eye_pts_arr)
+            right_ratio = get_blink_ratio(right_eye_pts_arr)
+            if left_ratio < 0.2 and right_ratio < 0.2:
+                direction = "blink"
+                cv2.putText(image, "Blinking", (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                break
+
+            # Gaze vector
+            left_vector = left_iris_center - np.mean(left_eye_pts_arr, axis=0)
+            right_vector = right_iris_center - np.mean(right_eye_pts_arr, axis=0)
+            avg_vector = (left_vector + right_vector) / 2
+            dx, dy = avg_vector[0], avg_vector[1]
+
+            # Direction classification
+            abs_dx, abs_dy = abs(dx), abs(dy)
+            if abs_dx < 5.0 and abs_dy < 5.0:
+                direction = "forward"
+                cv2.circle(image, (int(left_eye_center[0]), int(left_eye_center[1])), 6, (0, 255, 0), -1)
+                cv2.circle(image, (int(right_eye_center[0]), int(right_eye_center[1])), 6, (0, 255, 0), -1)
+            elif abs_dx > abs_dy:
+                direction = "right" if dx > 0 else "left"
+                draw_arrow(image, left_eye_center, left_vector, direction)
+                draw_arrow(image, right_eye_center, right_vector, direction)
+            else:
+                direction = "down" if dy > 0 else "up"
+                draw_arrow(image, left_eye_center, left_vector, direction)
+                draw_arrow(image, right_eye_center, right_vector, direction)
+
+    _, buffer = cv2.imencode(".jpg", image)
+    image_base64 = base64.b64encode(buffer).decode("utf-8")
+
+    return {
+        "annotated_image": f"data:image/jpeg;base64,{image_base64}",
+        "direction": direction
+    }
+
+@app.post("/analyze/")
+async def analyze(file: UploadFile = File(...)):
     contents = await file.read()
     image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
 
@@ -104,29 +141,28 @@ async def eye_direction(file: UploadFile = File(...)):
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
 
+    left_pupil_size = None
+    right_pupil_size = None
+
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
-            left_eye_center, left_eye_pts = get_eye_center(face_landmarks.landmark, LEFT_EYE, (h, w))
-            right_eye_center, right_eye_pts = get_eye_center(face_landmarks.landmark, RIGHT_EYE, (h, w))
-            left_iris_center = get_iris_center(face_landmarks.landmark, LEFT_IRIS, (h, w))
-            right_iris_center = get_iris_center(face_landmarks.landmark, RIGHT_IRIS, (h, w))
+            left_iris_pts = [(int(face_landmarks.landmark[i].x * w), int(face_landmarks.landmark[i].y * h)) for i in LEFT_IRIS]
+            right_iris_pts = [(int(face_landmarks.landmark[i].x * w), int(face_landmarks.landmark[i].y * h)) for i in RIGHT_IRIS]
 
-            # Gaze vectors
-            left_gaze = left_iris_center - np.mean(left_eye_pts, axis=0)
-            right_gaze = right_iris_center - np.mean(right_eye_pts, axis=0)
-            avg_gaze = (left_gaze + right_gaze) / 2
+            left_pupil_size = round(np.linalg.norm(np.array(left_iris_pts[0]) - np.array(left_iris_pts[2])), 2)
+            right_pupil_size = round(np.linalg.norm(np.array(right_iris_pts[0]) - np.array(right_iris_pts[2])), 2)
 
-            # Draw arrows on the frame
-            draw_gaze_vector(image, left_eye_center, left_gaze, length=40, color=(255, 0, 0))
-            draw_gaze_vector(image, right_eye_center, right_gaze, length=40, color=(255, 0, 0))
-            #center_between_eyes = (left_eye_center + right_eye_center) / 2
-            #draw_gaze_vector(image, center_between_eyes, avg_gaze, length=60, color=(0, 255, 0))
+            # Draw pupils
+            for pt in left_iris_pts + right_iris_pts:
+                cv2.circle(image, pt, 2, (0, 255, 255), -1)
 
     _, buffer = cv2.imencode(".jpg", image)
     image_base64 = base64.b64encode(buffer).decode("utf-8")
 
     return {
-        "annotated_image": f"data:image/jpeg;base64,{image_base64}"
+        "annotated_image": f"data:image/jpeg;base64,{image_base64}",
+        "left_pupil_size": left_pupil_size,
+        "right_pupil_size": right_pupil_size
     }
 
 if __name__ == "__main__":
