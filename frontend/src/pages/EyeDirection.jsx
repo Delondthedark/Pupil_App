@@ -45,7 +45,7 @@ const EyeDirection = () => {
       formData.append('file', blob, 'frame.jpg');
 
       try {
-        const res = await fetch('https://dates-equity-attempts-metadata.trycloudflare.com/eye_direction/', {
+        const res = await fetch('https://resume-throws-discrete-movies.trycloudflare.com/eye_direction/', {
           method: 'POST',
           body: formData,
         });

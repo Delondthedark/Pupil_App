@@ -22,14 +22,14 @@ export default function FoodAnalysis() {
     formData.append('image', selectedFile);
 
     try {
-      const res = await fetch('https://dumb-addresses-appear-seemed.trycloudflare.com/api/food/upload', {
+      const res = await fetch('https://learned-shipment-disable-trap.trycloudflare.com/api/food/upload', {
         method: 'POST',
         body: formData,
       });
       const result = await res.json();
       console.log('📤 Enqueue response:', result);
 
-      await fetch('https://dumb-addresses-appear-seemed.trycloudflare.com/api/queue/enqueue', {
+      await fetch('https://learned-shipment-disable-trap.trycloudflare.com/api/queue/enqueue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: result.imageUrl }),
@@ -48,7 +48,7 @@ export default function FoodAnalysis() {
   const fetchResults = async () => {
     setLoadingResults(true);
     try {
-      const res = await fetch('https://dumb-addresses-appear-seemed.trycloudflare.com/api/queue/results');
+      const res = await fetch('https://probably-common-worse-increase.trycloudflare.com/api/food/results');
       const items = await res.json();
       setData(items);
     } catch (err) {
@@ -86,11 +86,15 @@ export default function FoodAnalysis() {
           <div key={idx} style={styles.card}>
             <img
               src={`data:image/jpeg;base64,${entry.annotatedImage}`}
-              alt={entry.item}
+              alt="Annotated Result"
               style={styles.resultImage}
             />
             <div style={styles.textBlock}>
-              <p style={styles.itemName}>{entry.item}</p>
+              <p style={styles.itemName}>
+                {Array.isArray(entry.items)
+                  ? entry.items.join(', ')
+                  : entry.items || 'No items'}
+              </p>
               <p style={styles.timestamp}>{new Date(entry.timestamp).toLocaleString()}</p>
             </div>
           </div>

@@ -12,7 +12,7 @@ const AppLayout = () => {
     { label: 'Food Analysis', path: '/food' },
     { label: 'Gaze Pattern', path: '/fixation' },
     { label: 'PLR Test', path: '/plr' },
-    { label: 'Eye Direction', path: '/eye-direction' }, // ✅ New tab
+    { label: 'Eye Direction', path: '/eye-direction' },
   ];
 
   const handleNavigate = (path) => {
@@ -23,20 +23,28 @@ const AppLayout = () => {
   return (
     <div style={styles.appContainer}>
       <header style={styles.header}>
-        <h1
-          style={styles.headerTitle}
+        <div
           onClick={() => {
             navigate('/');
             window.location.reload();
           }}
+          style={styles.logoWrapper}
         >
-          Humanity Vision
-        </h1>
+          {/* Apply currentColor by using class or inline style */}
+          <img
+            src="/logo.svg"
+            alt="Humanity Vision Logo"
+            style={styles.logoImage}
+            className="colored-logo"
+          />
+        </div>
+
         <div style={styles.hamburger} onClick={() => setMenuOpen(!menuOpen)}>
           <div style={styles.bar}></div>
           <div style={styles.bar}></div>
           <div style={styles.bar}></div>
         </div>
+
         {menuOpen && (
           <div style={styles.menu}>
             {tabs.map((tab) => (
@@ -81,13 +89,15 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: '26px',
-    fontWeight: '700',
-    color: '#007AFF',
-    margin: 0,
+  logoWrapper: {
+    display: 'flex',
+    alignItems: 'center',
     cursor: 'pointer',
-    fontFamily: "'Orbitron', 'Avenir', sans-serif",
+  },
+  logoImage: {
+    height: '36px',
+    objectFit: 'contain',
+    filter: 'invert(32%) sepia(96%) saturate(3144%) hue-rotate(195deg) brightness(98%) contrast(101%)',
   },
   hamburger: {
     width: '30px',
