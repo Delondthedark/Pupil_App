@@ -119,7 +119,7 @@ useEffect(() => {
     }}>
       <h2 style={{
         textAlign: 'center',
-        color: '#005EB8',
+        color: '#1B5A72',
         fontSize: 'clamp(1.5rem, 5vw, 2rem)',
         marginBottom: '20px'
       }}>

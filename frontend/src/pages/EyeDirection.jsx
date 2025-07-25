@@ -111,7 +111,7 @@ const styles = {
   title: {
     fontSize: '24px',
     fontWeight: 600,
-    color: '#007AFF',
+    color: '#1B5A72',
     marginBottom: '1rem',
   },
   camera: {

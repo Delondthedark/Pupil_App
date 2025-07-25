@@ -19,7 +19,7 @@ const styles = {
   title: {
     fontSize: '26px',
     fontWeight: '700',
-    color: '#007AFF',
+    color: '#1B5A72',
   },
   subtitle: {
     fontSize: '16px',

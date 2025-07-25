@@ -109,7 +109,7 @@ export default function FoodAnalysis() {
 
 const styles = {
   page: { padding: '1rem', fontFamily: 'Segoe UI', maxWidth: 480, margin: '0 auto' },
-  title: { textAlign: 'center', color: '#007AFF', fontSize: '1.75rem', marginBottom: '1.5rem' },
+  title: { textAlign: 'center', color: '#1B5A72', fontSize: '1.75rem', marginBottom: '1.5rem' },
   uploadSection: { marginBottom: '2rem', textAlign: 'center' },
   fileInput: { width: '100%', padding: '0.5rem', marginBottom: '1rem' },
   previewWrapper: { position: 'relative' },
