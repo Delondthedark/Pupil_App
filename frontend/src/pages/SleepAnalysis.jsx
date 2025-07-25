@@ -217,7 +217,7 @@ useEffect(() => {
                 fontSize: '1rem',
                 borderRadius: '6px',
                 border: 'none',
-                background: '#005EB8',
+                background: '#1B5A72',
                 color: 'white',
                 cursor: 'pointer',
                 width: '90%',

@@ -151,7 +151,7 @@ const styles = {
     border: '1px dashed #ccc',
   },
   button: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#1B5A72',
     color: '#fff',
     padding: '0.75rem 1.5rem',
     border: 'none',
