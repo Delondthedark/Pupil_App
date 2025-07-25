@@ -1,3 +1,5 @@
+PORT=3001
+AI_SERVICE_URL=http://localhost:8000
 PGUSER=myuser
 PGPASSWORD=mypassword
 PGHOST=localhost

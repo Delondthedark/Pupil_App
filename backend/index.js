@@ -1,13 +1,17 @@
 // backend/index.js
 import express from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
 import pool from './db.js'; // ✅ PostgreSQL pool for sleep
 import foodRouter from './routes/food.js'; // Food upload + result endpoints
 import foodImageQueue from './routes/foodImageQueue.js'; // Image queue system
 import sleepRouter from './routes/sleep.js'; // Sleep analysis routes
 
+// Load environment variables
+dotenv.config();
+
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
@@ -31,6 +35,7 @@ app.use('/api/sleep', sleepRouter);         // ✅ Sleep tracking
 app.get('/', (req, res) => res.send('👋 Backend running'));
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
 });
+
