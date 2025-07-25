@@ -137,7 +137,7 @@ const PupilSize = () => {
     },
     button: {
       marginTop: '1rem',
-      backgroundColor: '#007aff',
+      backgroundColor: '#1B5A72',
       color: '#fff',
       border: 'none',
       borderRadius: '8px',
