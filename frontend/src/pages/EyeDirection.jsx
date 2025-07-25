@@ -45,7 +45,7 @@ const EyeDirection = () => {
       formData.append('file', blob, 'frame.jpg');
 
       try {
-        const res = await fetch('https://resume-throws-discrete-movies.trycloudflare.com/eye_direction/', {
+        const res = await fetch('${process.env.REACT_APP_AI_API_URL}/eye_direction/', {
           method: 'POST',
           body: formData,
         });
