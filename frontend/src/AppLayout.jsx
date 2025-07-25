@@ -30,12 +30,10 @@ const AppLayout = () => {
           }}
           style={styles.logoWrapper}
         >
-          {/* Apply currentColor by using class or inline style */}
           <img
             src="/logo.svg"
             alt="Humanity Vision Logo"
             style={styles.logoImage}
-            className="colored-logo"
           />
         </div>
 
@@ -97,7 +95,7 @@ const styles = {
   logoImage: {
     height: '36px',
     objectFit: 'contain',
-    filter: 'invert(32%) sepia(96%) saturate(3144%) hue-rotate(195deg) brightness(98%) contrast(101%)',
+    filter: 'none', // removed custom filter
   },
   hamburger: {
     width: '30px',
