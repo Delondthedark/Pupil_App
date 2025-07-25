@@ -17,12 +17,13 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 const SleepAnalysis = () => {
   const [sleepData, setSleepData] = useState([]);
 
-  useEffect(() => {
-    fetch('https://learned-shipment-disable-trap.trycloudflare.com/api/sleep')
-      .then(response => response.json())
-      .then(data => Array.isArray(data) && setSleepData(data))
-      .catch(error => console.error('Error fetching sleep data:', error));
-  }, []);
+useEffect(() => {
+  const baseURL = process.env.REACT_APP_API_BASE_URL;
+  fetch(`${baseURL}/api/sleep`)
+    .then(response => response.json())
+    .then(data => Array.isArray(data) && setSleepData(data))
+    .catch(error => console.error('Error fetching sleep data:', error));
+}, []);
 
   const formatMinutes = (text) => {
     const minutes = parseInt(text?.replace('m', '') || 0, 10);
