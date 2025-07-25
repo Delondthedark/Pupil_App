@@ -35,7 +35,6 @@ const AppLayout = () => {
             alt="Humanity Vision Logo"
             style={styles.logoImage}
           />
-          <span style={styles.logoText}>Humanity Vision</span>
         </div>
 
         <div style={styles.hamburger} onClick={() => setMenuOpen(!menuOpen)}>
@@ -53,7 +52,7 @@ const AppLayout = () => {
                 style={{
                   ...styles.menuItem,
                   fontWeight: location.pathname === tab.path ? '600' : '400',
-                  color: location.pathname === tab.path ? '#1B5A72' : '#1B5A72',
+                  color: '#1B5A72',
                 }}
               >
                 {tab.label}
@@ -92,17 +91,11 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     cursor: 'pointer',
-    gap: '0.6rem',
   },
   logoImage: {
     height: '36px',
     objectFit: 'contain',
     filter: 'none',
-  },
-  logoText: {
-    fontSize: '1.2rem',
-    fontWeight: 600,
-    color: '#1B5A72',
   },
   hamburger: {
     width: '30px',
@@ -138,7 +131,7 @@ const styles = {
     flex: 1,
     overflowY: 'auto',
     padding: '1rem',
-    color: '#1B5A72', // All inner text adopts logo color
+    color: '#1B5A72',
   },
 };
 
