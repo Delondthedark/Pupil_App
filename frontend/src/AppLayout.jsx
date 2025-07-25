@@ -97,7 +97,7 @@ const styles = {
   logoImage: {
     height: '36px',
     objectFit: 'contain',
-    filter: 'invert(22%) sepia(33%) saturate(710%) hue-rotate(162deg) brightness(93%) contrast(92%)',
+    filter: 'invert(32%) sepia(96%) saturate(3144%) hue-rotate(195deg) brightness(98%) contrast(101%)',
   },
   hamburger: {
     width: '30px',
