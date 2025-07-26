@@ -53,7 +53,7 @@ const PupilSize = () => {
         formData.append('file', blob, 'frame.jpg');
 
         try {
-          const res = await fetch('${process.env.REACT_APP_AI_API_URL}/analyze/', {
+          const res = await fetch(`${process.env.REACT_APP_AI_API_URL}/analyze/`, {
             method: 'POST',
             body: formData,
           });

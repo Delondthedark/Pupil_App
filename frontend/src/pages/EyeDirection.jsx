@@ -25,7 +25,7 @@ const EyeDirection = () => {
     if (isRunning) {
       interval = setInterval(() => {
         sendFrame();
-      }, 100); // every 100ms
+      }, 100);
     }
     return () => clearInterval(interval);
   }, [isRunning]);
@@ -45,7 +45,7 @@ const EyeDirection = () => {
       formData.append('file', blob, 'frame.jpg');
 
       try {
-        const res = await fetch('${process.env.REACT_APP_AI_API_URL}/eye_direction/', {
+        const res = await fetch(`${process.env.REACT_APP_AI_API_URL}/eye_direction/`, {
           method: 'POST',
           body: formData,
         });
@@ -61,11 +61,9 @@ const EyeDirection = () => {
 
   const handleToggle = () => {
     if (isRunning) {
-      // On Stop
       setIsRunning(false);
-      setProcessedImg(null); // Hide processed image and show placeholder again
+      setProcessedImg(null);
     } else {
-      // On Start
       setIsRunning(true);
     }
   };
@@ -74,7 +72,6 @@ const EyeDirection = () => {
     <div style={styles.container}>
       <h2 style={styles.title}>👁️ Eye Direction Analysis</h2>
       <div style={styles.camera}>
-        {/* Hidden live feed */}
         <video
           ref={videoRef}
           autoPlay
@@ -88,12 +85,10 @@ const EyeDirection = () => {
           {isRunning ? 'Stop Eye Direction Analysis' : 'Start Eye Direction Analysis'}
         </button>
 
-        {/* Annotated image shown only while running */}
         {processedImg && isRunning && (
           <img src={processedImg} alt="Annotated Frame" style={styles.image} />
         )}
 
-        {/* Placeholder shown only when not running */}
         {!isRunning && (
           <div style={styles.placeholder}>Camera ready. Press Start.</div>
         )}
