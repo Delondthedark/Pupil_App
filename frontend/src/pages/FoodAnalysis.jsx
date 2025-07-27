@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 export default function FoodAnalysis() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -6,6 +6,8 @@ export default function FoodAnalysis() {
   const [data, setData] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [loadingResults, setLoadingResults] = useState(false);
+
+  const BACKEND_URL = process.env.REACT_APP_BACKEND_BASE_URL;
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -15,57 +17,54 @@ export default function FoodAnalysis() {
     }
   };
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_BASE_URL;
+  const handleUpload = async () => {
+    if (!selectedFile) return;
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('image', selectedFile);
 
-const handleUpload = async () => {
-  if (!selectedFile) return;
-  setUploading(true);
-  const formData = new FormData();
-  formData.append('image', selectedFile);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/food/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const result = await res.json();
+      console.log('📤 Enqueue response:', result);
 
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/food/upload`, {
-      method: 'POST',
-      body: formData,
-    });
-    const result = await res.json();
-    console.log('📤 Enqueue response:', result);
+      await fetch(`${BACKEND_URL}/api/queue/enqueue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: result.imageUrl }),
+      });
 
-    await fetch(`${BACKEND_URL}/api/queue/enqueue`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageUrl: result.imageUrl }),
-    });
+      setSelectedFile(null);
+      setPreviewUrl('');
+      fetchResults();
+    } catch (err) {
+      console.error('Upload error:', err);
+    } finally {
+      setUploading(false);
+    }
+  };
 
-    setSelectedFile(null);
-    setPreviewUrl('');
-    fetchResults();
-  } catch (err) {
-    console.error('Upload error:', err);
-  } finally {
-    setUploading(false);
-  }
-};
-
-const fetchResults = async () => {
-  setLoadingResults(true);
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/food/results`);
-    const items = await res.json();
-    setData(items);
-  } catch (err) {
-    console.error('Fetch error:', err);
-  } finally {
-    setLoadingResults(false);
-  }
-};
-
+  const fetchResults = useCallback(async () => {
+    setLoadingResults(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/food/results`);
+      const items = await res.json();
+      setData(items);
+    } catch (err) {
+      console.error('Fetch error:', err);
+    } finally {
+      setLoadingResults(false);
+    }
+  }, [BACKEND_URL]);
 
   useEffect(() => {
     fetchResults();
     const interval = setInterval(fetchResults, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchResults]);
 
   return (
     <div style={styles.page}>
