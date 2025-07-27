@@ -15,48 +15,51 @@ export default function FoodAnalysis() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile) return;
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('image', selectedFile);
+const BACKEND_URL = process.env.REACT_APP_BACKEND_BASE_URL;
 
-    try {
-      const res = await fetch('https://learned-shipment-disable-trap.trycloudflare.com/api/food/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const result = await res.json();
-      console.log('📤 Enqueue response:', result);
+const handleUpload = async () => {
+  if (!selectedFile) return;
+  setUploading(true);
+  const formData = new FormData();
+  formData.append('image', selectedFile);
 
-      await fetch('https://learned-shipment-disable-trap.trycloudflare.com/api/queue/enqueue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: result.imageUrl }),
-      });
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/food/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    const result = await res.json();
+    console.log('📤 Enqueue response:', result);
 
-      setSelectedFile(null);
-      setPreviewUrl('');
-      fetchResults();
-    } catch (err) {
-      console.error('Upload error:', err);
-    } finally {
-      setUploading(false);
-    }
-  };
+    await fetch(`${BACKEND_URL}/api/queue/enqueue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl: result.imageUrl }),
+    });
 
-  const fetchResults = async () => {
-    setLoadingResults(true);
-    try {
-      const res = await fetch('https://probably-common-worse-increase.trycloudflare.com/api/food/results');
-      const items = await res.json();
-      setData(items);
-    } catch (err) {
-      console.error('Fetch error:', err);
-    } finally {
-      setLoadingResults(false);
-    }
-  };
+    setSelectedFile(null);
+    setPreviewUrl('');
+    fetchResults();
+  } catch (err) {
+    console.error('Upload error:', err);
+  } finally {
+    setUploading(false);
+  }
+};
+
+const fetchResults = async () => {
+  setLoadingResults(true);
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/food/results`);
+    const items = await res.json();
+    setData(items);
+  } catch (err) {
+    console.error('Fetch error:', err);
+  } finally {
+    setLoadingResults(false);
+  }
+};
+
 
   useEffect(() => {
     fetchResults();
