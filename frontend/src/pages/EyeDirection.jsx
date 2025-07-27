@@ -25,36 +25,46 @@ const EyeDirection = () => {
     if (isRunning) {
       interval = setInterval(() => {
         sendFrame();
-      }, 100);
+      }, 300); // Slow down to 3 FPS to avoid overload
     }
     return () => clearInterval(interval);
   }, [isRunning]);
 
   const sendFrame = () => {
     if (!videoRef.current || !canvasRef.current) return;
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
     canvas.toBlob(async (blob) => {
       if (!blob) return;
+
       const formData = new FormData();
       formData.append('file', blob, 'frame.jpg');
 
       try {
-        const res = await fetch(`${process.env.REACT_APP_AI_API_URL}/eye_direction/`, {
+        const response = await fetch(`${process.env.REACT_APP_AI_API_URL}/eye_direction/`, {
           method: 'POST',
           body: formData,
         });
-        const data = await res.json();
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
         if (data?.annotated_image) {
           setProcessedImg(data.annotated_image);
         }
       } catch (err) {
-        console.error('Failed to send frame:', err);
+        console.error('AI API error:', err);
       }
     }, 'image/jpeg');
   };
