@@ -165,6 +165,10 @@ async def analyze(file: UploadFile = File(...)):
         "right_pupil_size": right_pupil_size
     }
 
+@app.get("/ping")
+def ping():
+    return {"message": "AI service is alive"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
