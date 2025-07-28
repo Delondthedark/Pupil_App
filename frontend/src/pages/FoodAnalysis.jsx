@@ -7,7 +7,7 @@ export default function FoodAnalysis() {
   const [uploading, setUploading] = useState(false);
   const [loadingResults, setLoadingResults] = useState(false);
 
-  const BACKEND_URL = process.env.REACT_APP_BACKEND_BASE_URL;
+  const apiBase = process.env.REACT_APP_API_BASE_URL;
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -24,14 +24,14 @@ export default function FoodAnalysis() {
     formData.append('image', selectedFile);
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/food/upload`, {
+      const res = await fetch(`${apiBase}/api/food/upload`, {
         method: 'POST',
         body: formData,
       });
       const result = await res.json();
       console.log('📤 Enqueue response:', result);
 
-      await fetch(`${BACKEND_URL}/api/queue/enqueue`, {
+      await fetch(`${apiBase}/api/queue/enqueue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: result.imageUrl }),
@@ -50,7 +50,7 @@ export default function FoodAnalysis() {
   const fetchResults = useCallback(async () => {
     setLoadingResults(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/food/results`);
+      const res = await fetch(`${apiBase}/api/food/results`);
       const items = await res.json();
       setData(items);
     } catch (err) {
@@ -58,7 +58,7 @@ export default function FoodAnalysis() {
     } finally {
       setLoadingResults(false);
     }
-  }, [BACKEND_URL]);
+  }, [apiBase]);
 
   useEffect(() => {
     fetchResults();
