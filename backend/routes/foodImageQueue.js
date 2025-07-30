@@ -1,3 +1,4 @@
+// backend/foodImageQueue.js
 import express from 'express';
 
 const router = express.Router();
@@ -5,7 +6,7 @@ const queue = [];
 const processed = new Set();
 const results = [];
 
-// Enqueue image URL
+// === POST /api/queue/enqueue ===
 router.post('/enqueue', (req, res) => {
   const { imageUrl } = req.body;
   if (!imageUrl) return res.status(400).json({ error: 'No imageUrl provided' });
@@ -17,7 +18,7 @@ router.post('/enqueue', (req, res) => {
   res.json({ success: true });
 });
 
-// Dequeue next unprocessed image
+// === GET /api/queue/dequeue ===
 router.get('/dequeue', (_, res) => {
   const nextImage = queue.find(url => !processed.has(url));
   if (nextImage) {
@@ -28,7 +29,7 @@ router.get('/dequeue', (_, res) => {
   res.status(204).send();
 });
 
-// Receive analyzed result
+// === POST /api/queue/result ===
 router.post('/result', (req, res) => {
   const { item, annotatedImage } = req.body;
   if (!item || !annotatedImage) {
@@ -39,7 +40,7 @@ router.post('/result', (req, res) => {
   res.json({ success: true });
 });
 
-// Get all results
+// === GET /api/queue/results ===
 router.get('/results', (_, res) => {
   res.json(results);
 });

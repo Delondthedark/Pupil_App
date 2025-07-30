@@ -24,8 +24,9 @@ const foodResults = [];
 router.post('/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const imageUrl = `https://probably-common-worse-increase.trycloudflare.com/uploads/${req.file.filename}`;
-  console.log('📸 Image enqueued:', imageUrl);
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
+  const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+  console.log('📸 Image uploaded at:', imageUrl);
 
   res.json({ message: 'Image uploaded', imageUrl });
 });
