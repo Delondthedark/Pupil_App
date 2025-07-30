@@ -3,6 +3,9 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const router = express.Router();
 
@@ -24,8 +27,8 @@ const foodResults = [];
 router.post('/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
-  const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+  const publicUrl = process.env.PUBLIC_URL || 'http://localhost:3001';
+  const imageUrl = `${publicUrl}/uploads/${req.file.filename}`;
   console.log('📸 Image uploaded at:', imageUrl);
 
   res.json({ message: 'Image uploaded', imageUrl });
