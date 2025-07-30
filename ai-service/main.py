@@ -6,6 +6,18 @@ import numpy as np
 import mediapipe as mp
 import base64
 
+from collections import deque
+
+# Simple state to track past iris centers
+iris_history = deque(maxlen=20)  # last 20 frames
+
+def draw_gaze_shift_trail(image, trail):
+    for i in range(1, len(trail)):
+        pt1 = tuple(map(int, trail[i - 1]))
+        pt2 = tuple(map(int, trail[i]))
+        cv2.line(image, pt1, pt2, (0, 0, 255), 2)
+    return image
+
 app = FastAPI()
 
 app.add_middleware(
@@ -35,7 +47,6 @@ def get_eye_center(landmarks, eye_indices, shape):
     h, w = shape
     pts = [(int(landmarks[idx].x * w), int(landmarks[idx].y * h)) for idx in eye_indices]
     return np.mean(pts, axis=0), pts
-
 
 def get_iris_center(landmarks, iris_indices, shape):
     h, w = shape
@@ -168,6 +179,44 @@ async def analyze(file: UploadFile = File(...)):
 @app.get("/ping")
 def ping():
     return {"message": "AI service is alive"}
+
+@app.post("/gaze_shift/")
+async def gaze_shift(file: UploadFile = File(...)):
+    contents = await file.read()
+    image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return JSONResponse(content={"error": "Invalid image"}, status_code=400)
+
+    image = cv2.flip(image, 1)
+    h, w, _ = image.shape
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb)
+
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            # Get center of left and right iris
+            left_iris_center = get_iris_center(face_landmarks.landmark, LEFT_IRIS, (h, w))
+            right_iris_center = get_iris_center(face_landmarks.landmark, RIGHT_IRIS, (h, w))
+
+            # Average gaze point
+            avg_iris = ((left_iris_center[0] + right_iris_center[0]) / 2,
+                        (left_iris_center[1] + right_iris_center[1]) / 2)
+
+            iris_history.append(avg_iris)
+
+            # Draw trail
+            image = draw_gaze_shift_trail(image, list(iris_history))
+
+            # Highlight current position
+            cv2.circle(image, tuple(map(int, avg_iris)), 5, (0, 255, 255), -1)
+
+    _, buffer = cv2.imencode(".jpg", image)
+    image_base64 = base64.b64encode(buffer).decode("utf-8")
+
+    return {
+        "annotated_image": f"data:image/jpeg;base64,{image_base64}"
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
