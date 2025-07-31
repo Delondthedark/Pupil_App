@@ -21,11 +21,11 @@ const ParkinsonAnalysis = () => {
   const parseCSV = (text) => {
     const rows = text.trim().split('\n');
     const headers = rows[0].split(',');
-    const data = rows.slice(1).map(row => {
+    const data = rows.slice(1).map((row) => {
       const values = row.split(',');
       const entry = {};
       headers.forEach((h, i) => {
-        entry[h.trim()] = values[i].trim();
+        entry[h.trim()] = values[i]?.trim();
       });
       return entry;
     });
@@ -110,3 +110,34 @@ const styles = {
     marginTop: '1rem',
     fontSize: '14px',
     color: '#444',
+    fontStyle: 'italic',
+  },
+  tableContainer: {
+    marginTop: '2rem',
+    overflowX: 'auto',
+  },
+  table: {
+    width: '100%',
+    maxWidth: '800px',
+    margin: '0 auto',
+    borderCollapse: 'collapse',
+    fontSize: '14px',
+  },
+  note: {
+    marginTop: '1rem',
+    fontSize: '13px',
+    color: '#888',
+  },
+  th: {
+    backgroundColor: '#f0f0f0',
+    fontWeight: '600',
+    padding: '8px',
+    border: '1px solid #ccc',
+  },
+  td: {
+    padding: '8px',
+    border: '1px solid #ccc',
+  },
+};
+
+export default ParkinsonAnalysis;
