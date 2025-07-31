@@ -6,14 +6,15 @@ const AppLayout = () => {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const tabs = [
-    { label: 'Pupil Size', path: '/pupil' },
-    { label: 'Sleep Analysis', path: '/sleep' },
-    { label: 'Food Analysis', path: '/food' },
-    { label: 'Gaze Pattern', path: '/fixation' },
-    { label: 'PLR Test', path: '/plr' },
-    { label: 'Eye Direction', path: '/eye-direction' },
-  ];
+const tabs = [
+  { label: 'Pupil Size', path: '/pupil' },
+  { label: 'Sleep Analysis', path: '/sleep' },
+  { label: 'Food Analysis', path: '/food' },
+  { label: 'Gaze Pattern', path: '/fixation' },
+  { label: 'PLR Test', path: '/plr' },
+  { label: 'Eye Direction', path: '/eye-direction' },
+  { label: 'Parkinson Analysis', path: '/parkinson' }, // ✅ Add this line
+];
 
   const handleNavigate = (path) => {
     navigate(path);

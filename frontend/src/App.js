@@ -8,6 +8,7 @@ import FixationPattern from './pages/FixationPattern';
 import SleepAnalysis from './pages/SleepAnalysis';
 import FoodAnalysis from './pages/FoodAnalysis';
 import EyeDirection from './pages/EyeDirection'; // ✅ New import
+import ParkinsonAnalysis from './pages/ParkinsonAnalysis';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="sleep" element={<SleepAnalysis />} />
           <Route path="food" element={<FoodAnalysis />} />
           <Route path="eye-direction" element={<EyeDirection />} /> {/* ✅ New route */}
+          <Route path="/parkinson" element={<ParkinsonAnalysis />} />
         </Route>
       </Routes>
     </Router>

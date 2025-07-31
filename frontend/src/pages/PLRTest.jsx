@@ -7,6 +7,7 @@ const PLRTest = () => {
   const [processedImg, setProcessedImg] = useState(null);
   const [leftSize, setLeftSize] = useState(null);
   const [rightSize, setRightSize] = useState(null);
+  const [showFlash, setShowFlash] = useState(false);
 
   useEffect(() => {
     const startCamera = async () => {
@@ -25,18 +26,24 @@ const PLRTest = () => {
   useEffect(() => {
     let interval;
     if (isRunning) {
+      // Start flashing light sequence
+      setShowFlash(true);
+      setTimeout(() => {
+        setShowFlash(false);
+      }, 3000); // flash for 3 seconds
+
+      // Start sending frames to backend
       interval = setInterval(() => {
         sendFrame();
-      }, 300); // ~3 FPS
+      }, 300);
     }
     return () => clearInterval(interval);
   }, [isRunning]);
 
   const sendFrame = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    if (!video || !canvas) return;
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -55,20 +62,12 @@ const PLRTest = () => {
           method: 'POST',
           body: formData,
         });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-
         const data = await response.json();
-        if (data?.annotated_image) {
-          setProcessedImg(data.annotated_image);
-          setLeftSize(data.left_pupil_size);
-          setRightSize(data.right_pupil_size);
-        }
+        setProcessedImg(data.annotated_image);
+        setLeftSize(data.left_pupil_size);
+        setRightSize(data.right_pupil_size);
       } catch (err) {
-        console.error('PLR API error:', err);
+        console.error('PLR analyze error:', err);
       }
     }, 'image/jpeg');
   };
@@ -86,7 +85,10 @@ const PLRTest = () => {
 
   return (
     <div style={styles.container}>
-      <h2 style={styles.title}>👁️ PLR Test (Pupillary Light Reflex)</h2>
+      <h2 style={styles.title}>PLR Test (Pupillary Light Reflex)</h2>
+      <p style={styles.subtitle}>
+        Measures pupil response to a light stimulus by analyzing size changes in real-time.
+      </p>
 
       <video
         ref={videoRef}
@@ -102,16 +104,18 @@ const PLRTest = () => {
       </button>
 
       {processedImg && isRunning && (
-        <div style={styles.resultBox}>
-          <img src={processedImg} alt="PLR Result" style={styles.image} />
-          <p style={styles.pupilText}>👁️ Left Pupil Size: {leftSize}</p>
-          <p style={styles.pupilText}>👁️ Right Pupil Size: {rightSize}</p>
+        <div>
+          <img src={processedImg} alt="Pupil Frame" style={styles.image} />
+          <p style={styles.pupilText}>👁️ Left: {leftSize} | Right: {rightSize}</p>
         </div>
       )}
 
       {!isRunning && (
-        <div style={styles.placeholder}>Camera ready. Press Start to begin the PLR test.</div>
+        <div style={styles.placeholder}>Camera ready. Press Start Test.</div>
       )}
+
+      {/* Flash overlay during light stimulus */}
+      {showFlash && <div style={styles.flashOverlay}></div>}
     </div>
   );
 };
@@ -126,6 +130,11 @@ const styles = {
     fontSize: '24px',
     fontWeight: 600,
     color: '#1B5A72',
+    marginBottom: '0.5rem',
+  },
+  subtitle: {
+    fontSize: '16px',
+    color: '#666',
     marginBottom: '1rem',
   },
   video: {
@@ -144,14 +153,6 @@ const styles = {
     borderRadius: '12px',
     boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
   },
-  pupilText: {
-    fontSize: '16px',
-    color: '#333',
-    marginTop: '0.5rem',
-  },
-  resultBox: {
-    marginTop: '1rem',
-  },
   placeholder: {
     marginTop: '1rem',
     width: '100%',
@@ -167,6 +168,12 @@ const styles = {
     fontStyle: 'italic',
     border: '1px dashed #ccc',
   },
+  pupilText: {
+    marginTop: '0.5rem',
+    fontSize: '16px',
+    fontWeight: 500,
+    color: '#333',
+  },
   button: {
     backgroundColor: '#1B5A72',
     color: '#fff',
@@ -178,6 +185,17 @@ const styles = {
     cursor: 'pointer',
     boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
     marginTop: '1rem',
+  },
+  flashOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100vw',
+    height: '100vh',
+    backgroundColor: '#ffffff',
+    opacity: 0.95,
+    zIndex: 9999,
+    transition: 'opacity 0.3s ease',
   },
 };
 
