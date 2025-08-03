@@ -1,10 +1,9 @@
-// backend/foodImageQueue.js
+// backend/routes/foodImageQueue.js
 import express from 'express';
-
 const router = express.Router();
-const queue = [];
-const processed = new Set();
-const results = [];
+
+let queue = [];
+let processed = new Set();
 
 // === POST /api/queue/enqueue ===
 router.post('/enqueue', (req, res) => {
@@ -13,36 +12,33 @@ router.post('/enqueue', (req, res) => {
 
   if (!queue.includes(imageUrl)) {
     queue.push(imageUrl);
-    console.log('📸 Image enqueued:', imageUrl);
+    console.log('📥 Image enqueued:', imageUrl);
+  } else {
+    console.log('⚠️ Duplicate enqueue ignored:', imageUrl);
   }
+
   res.json({ success: true });
 });
 
 // === GET /api/queue/dequeue ===
-router.get('/dequeue', (_, res) => {
-  const nextImage = queue.find(url => !processed.has(url));
-  if (nextImage) {
-    processed.add(nextImage);
-    console.log('📥 Dequeued image:', nextImage);
-    return res.json({ imageUrl: nextImage });
+router.get('/dequeue', (req, res) => {
+  const next = queue.find(url => !processed.has(url));
+
+  if (next) {
+    processed.add(next);
+    console.log('📤 Dequeued image for processing:', next);
+    return res.json({ imageUrl: next });
   }
-  res.status(204).send();
+
+  res.status(204).send(); // No content
 });
 
-// === POST /api/queue/result ===
-router.post('/result', (req, res) => {
-  const { item, annotatedImage } = req.body;
-  if (!item || !annotatedImage) {
-    return res.status(400).json({ error: 'Missing item or annotatedImage' });
-  }
-  results.unshift({ item, annotatedImage, timestamp: Date.now() });
-  console.log('✅ Result saved:', item);
-  res.json({ success: true });
-});
-
-// === GET /api/queue/results ===
-router.get('/results', (_, res) => {
-  res.json(results);
+// Optional: clear queue
+router.delete('/clear', (req, res) => {
+  queue = [];
+  processed = new Set();
+  console.log('🧹 Queue cleared');
+  res.json({ message: 'Queue cleared' });
 });
 
 export default router;
