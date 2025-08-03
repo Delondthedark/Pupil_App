@@ -37,7 +37,7 @@ app.use('/api/queue', foodImageQueue);      // /dequeue (iOS food analyzer)
 app.use('/api/sleep', sleepRouter);         // Sleep tracking
 
 // ✅ Root route for health check
-app.get('/', (req, res) => res.send('👋 Backend running'));
+//app.get('/', (req, res) => res.send('👋 Backend running'));
 
 // ✅ Start the server
 app.listen(PORT, '0.0.0.0', () => {
