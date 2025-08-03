@@ -13,29 +13,33 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
+// ✅ Enhanced CORS config to allow frontend domain
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  credentials: true,
+}));
+
+// Parse incoming JSON
 app.use(express.json({ limit: '50mb' }));
 
-// 🔌 Attach DB pool to every request (for /api/sleep)
+// ✅ Attach DB pool to every request (for /api/sleep)
 app.use((req, res, next) => {
   req.pool = pool;
   next();
 });
 
-// Static file serving
+// Serve static files (e.g., uploaded images)
 app.use('/uploads', express.static('uploads'));
 
-// API Routes
-app.use('/api/food', foodRouter);           // ✅ /upload, /result, /results
-app.use('/api/queue', foodImageQueue);      // ✅ /dequeue (for iOS app)
-app.use('/api/sleep', sleepRouter);         // ✅ Sleep tracking
+// ✅ API Routes
+app.use('/api/food', foodRouter);           // /upload, /result, /results
+app.use('/api/queue', foodImageQueue);      // /dequeue (iOS food analyzer)
+app.use('/api/sleep', sleepRouter);         // Sleep tracking
 
-// Root route
+// ✅ Root route for health check
 app.get('/', (req, res) => res.send('👋 Backend running'));
 
-// Start server
+// ✅ Start the server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
 });
-
