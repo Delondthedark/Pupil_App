@@ -24,14 +24,14 @@ export default function FoodAnalysis() {
     formData.append('image', selectedFile);
 
     try {
-      const res = await fetch(`${apiBase}/api/food/upload`, {
+      const res = await fetch(`${apiBase}/food/upload`, {
         method: 'POST',
         body: formData,
       });
       const result = await res.json();
       console.log('📤 Enqueue response:', result);
 
-      await fetch(`${apiBase}/api/queue/enqueue`, {
+      await fetch(`${apiBase}/queue/enqueue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: result.imageUrl }),
@@ -50,7 +50,7 @@ export default function FoodAnalysis() {
   const fetchResults = useCallback(async () => {
     setLoadingResults(true);
     try {
-      const res = await fetch(`${apiBase}/api/food/results`);
+      const res = await fetch(`${apiBase}/food/results`);
       const items = await res.json();
       setData(items);
     } catch (err) {
