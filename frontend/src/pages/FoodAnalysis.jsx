@@ -17,35 +17,63 @@ export default function FoodAnalysis() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile) return;
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('image', selectedFile);
+const handleUpload = async () => {
+  if (!selectedFile) {
+    console.warn('🚫 No file selected');
+    return;
+  }
 
-    try {
-      const res = await fetch(`${apiBase}/food/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      const result = await res.json();
-      console.log('📤 Enqueue response:', result);
+  setUploading(true);
+  const formData = new FormData();
+  formData.append('image', selectedFile);
 
-      await fetch(`${apiBase}/queue/enqueue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: result.imageUrl }),
-      });
+  try {
+    console.log('📤 Uploading to:', `${apiBase}/food/upload`);
 
-      setSelectedFile(null);
-      setPreviewUrl('');
-      fetchResults();
-    } catch (err) {
-      console.error('Upload error:', err);
-    } finally {
-      setUploading(false);
+    const res = await fetch(`${apiBase}/food/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('❌ Upload failed. Status:', res.status, text);
+      return;
     }
-  };
+
+    const result = await res.json();
+    console.log('✅ Upload result:', result);
+
+    if (!result.imageUrl) {
+      console.error('❌ No imageUrl returned');
+      return;
+    }
+
+    const enqueueRes = await fetch(`${apiBase}/queue/enqueue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl: result.imageUrl }),
+    });
+
+    if (!enqueueRes.ok) {
+      const text = await enqueueRes.text();
+      console.error('❌ Enqueue failed. Status:', enqueueRes.status, text);
+      return;
+    }
+
+    const enqueueResult = await enqueueRes.json();
+    console.log('✅ Enqueue result:', enqueueResult);
+
+    setSelectedFile(null);
+    setPreviewUrl('');
+    fetchResults();
+  } catch (err) {
+    console.error('🔥 Upload error:', err);
+  } finally {
+    setUploading(false);
+  }
+};
+
 
   const fetchResults = useCallback(async () => {
     setLoadingResults(true);
