@@ -19,7 +19,7 @@ const SleepAnalysis = () => {
 
 useEffect(() => {
   const baseURL = process.env.REACT_APP_API_BASE_URL;
-  fetch(`${baseURL}/api/sleep`)
+  fetch(`${baseURL}/sleep`)
     .then(response => response.json())
     .then(data => Array.isArray(data) && setSleepData(data))
     .catch(error => console.error('Error fetching sleep data:', error));
