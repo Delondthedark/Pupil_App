@@ -32,9 +32,9 @@ app.use((req, res, next) => {
 app.use('/uploads', express.static('uploads'));
 
 // ✅ API Routes
-app.use('/api/food', foodRouter);           // /upload, /result, /results
-app.use('/api/queue', foodImageQueue);      // /dequeue (iOS food analyzer)
-app.use('/api/sleep', sleepRouter);         // Sleep tracking
+app.use('/food', foodRouter);           // /upload, /result, /results
+app.use('/queue', foodImageQueue);      // /dequeue (iOS food analyzer)
+app.use('/sleep', sleepRouter);         // Sleep tracking
 
 // ✅ Root route for health check
 //app.get('/', (req, res) => res.send('👋 Backend running'));
