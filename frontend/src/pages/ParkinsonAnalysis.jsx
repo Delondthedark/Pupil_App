@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
 import { saveAs } from 'file-saver';
 import { CSVLink } from 'react-csv';
@@ -30,7 +30,7 @@ const ParkinsonAnalysis = () => {
   const [filename, setFilename] = useState('');
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
-  const [chartRef, setChartRef] = useState(null);
+  const chartRef = useRef(null); // ✅ useRef for chart instance
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -175,14 +175,16 @@ const ParkinsonAnalysis = () => {
               <input type="checkbox" checked={showRight} onChange={() => setShowRight(!showRight)} />
               Right
             </label>
-            <button onClick={() => chartRef?.resetZoom()} style={styles.resetButton}>Reset Zoom</button>
+            <button onClick={() => chartRef.current?.resetZoom()} style={styles.resetButton}>
+              Reset Zoom
+            </button>
           </div>
 
           <div style={styles.chartContainer}>
             <Line
               data={generateChartData()}
               options={chartOptions}
-              ref={(chart) => setChartRef(chart?.chartInstance || chart)}
+              ref={chartRef} // ✅ proper ref usage
             />
           </div>
 
