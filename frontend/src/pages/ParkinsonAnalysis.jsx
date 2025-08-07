@@ -1,31 +1,13 @@
+// frontend/src/pages/ParkinsonAnalysis.jsx
 import React, { useState } from 'react';
-import { Line } from 'react-chartjs-2';
-import { saveAs } from 'file-saver';
-import {
-  Chart as ChartJS,
-  LineElement,
-  PointElement,
-  LinearScale,
-  TimeScale,
-  Title,
-  Tooltip,
-  Legend,
-  CategoryScale
-} from 'chart.js';
+import { Bar } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 
-ChartJS.register(
-  LineElement,
-  PointElement,
-  LinearScale,
-  TimeScale,
-  Title,
-  Tooltip,
-  Legend,
-  CategoryScale
-);
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const ParkinsonAnalysis = () => {
   const [csvData, setCsvData] = useState(null);
+  const [diagnosis, setDiagnosis] = useState('');
   const [filename, setFilename] = useState('');
 
   const handleFileChange = (e) => {
@@ -53,125 +35,86 @@ const ParkinsonAnalysis = () => {
       return entry;
     });
     setCsvData(data);
+    generateDiagnosis(data);
   };
 
-  const exportCSV = () => {
-    const blob = new Blob([JSON.stringify(csvData, null, 2)], { type: 'application/json' });
-    saveAs(blob, 'parkinson_analysis.json');
-  };
+  const generateDiagnosis = (data) => {
+    const leftSizes = data.map(row => parseFloat(row["Left Pupil Size (mm)"]));
+    const rightSizes = data.map(row => parseFloat(row["Right Pupil Size (mm)"]));
 
-  const getColumnStats = (key) => {
-    if (!csvData) return {};
-    const values = csvData.map((d) => parseFloat(d[key])).filter((v) => !isNaN(v));
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-    const std = Math.sqrt(values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length);
-    return { avg: avg.toFixed(2), std: std.toFixed(2) };
-  };
+    const leftStdDev = stddev(leftSizes);
+    const rightStdDev = stddev(rightSizes);
 
-  const preliminaryDiagnosis = () => {
-    if (!csvData) return null;
-    const left = getColumnStats('Left Pupil Size (mm)');
-    const right = getColumnStats('Right Pupil Size (mm)');
-    const diff = Math.abs(left.avg - right.avg);
-
-    if (diff > 0.5 || left.std < 0.1 || right.std < 0.1) {
-      return '⚠️ Irregularity detected. Recommend specialist review.';
+    if (leftStdDev > 0.25 || rightStdDev > 0.25) {
+      setDiagnosis('⚠️ Possible abnormal pupil reactivity — recommend further testing');
     } else {
-      return '✅ No major anomalies detected. Stable pupil response.';
+      setDiagnosis('✅ Normal pupil dynamics');
     }
   };
 
-  const generateChartData = () => {
-    const frames = csvData.map((d) => d['Frame Number']);
-    const left = csvData.map((d) => parseFloat(d['Left Pupil Size (mm)']));
-    const right = csvData.map((d) => parseFloat(d['Right Pupil Size (mm)']));
-    return {
-      labels: frames,
-      datasets: [
-        {
-          label: 'Left Pupil Size',
-          data: left,
-          borderColor: '#1B5A72',
-          fill: false
-        },
-        {
-          label: 'Right Pupil Size',
-          data: right,
-          borderColor: '#4ED8C3',
-          fill: false
-        }
-      ]
-    };
+  const stddev = (arr) => {
+    const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    const variance = arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
+    return Math.sqrt(variance);
+  };
+
+  const chartData = {
+    labels: csvData?.map((_, i) => i),
+    datasets: [
+      {
+        label: 'Left Pupil Size (mm)',
+        data: csvData?.map(row => parseFloat(row["Left Pupil Size (mm)"])),
+        backgroundColor: '#4ED8C3',
+      },
+      {
+        label: 'Right Pupil Size (mm)',
+        data: csvData?.map(row => parseFloat(row["Right Pupil Size (mm)"])),
+        backgroundColor: '#3F7F89',
+      }
+    ]
+  };
+
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top' },
+      title: {
+        display: true,
+        text: 'Pupil Size Over Time',
+        color: '#2E4057',
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#2E4057' } },
+      y: { ticks: { color: '#2E4057' } }
+    }
   };
 
   return (
     <div style={styles.container}>
       <h2 style={styles.title}>🧠 Parkinson's Data Analysis</h2>
-      <p style={styles.subtitle}>
-        Upload a CSV with pupil tracking metrics to visualize and get a preliminary report.
-      </p>
+      <p style={styles.text}>Upload a CSV file to analyze pupil metrics and screen for abnormalities.</p>
 
-      <input type="file" accept=".csv" onChange={handleFileChange} style={{ display: 'none' }} id="csv-upload" />
-      <label htmlFor="csv-upload" style={styles.button}>Upload CSV</label>
-      {filename && <p style={styles.filename}>📄 {filename}</p>}
+      <input
+        type="file"
+        accept=".csv"
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+        id="csv-upload"
+      />
+      <label htmlFor="csv-upload" style={styles.button}>
+        Upload CSV
+      </label>
 
       {csvData && (
         <>
-          <div style={styles.cardRow}>
-            {[
-              { label: 'Left Pupil Avg', value: getColumnStats('Left Pupil Size (mm)').avg },
-              { label: 'Right Pupil Avg', value: getColumnStats('Right Pupil Size (mm)').avg },
-              { label: 'Left Std Dev', value: getColumnStats('Left Pupil Size (mm)').std },
-              { label: 'Right Std Dev', value: getColumnStats('Right Pupil Size (mm)').std }
-            ].map((card, i) => (
-              <div key={i} style={styles.card}>
-                <div style={styles.cardLabel}>{card.label}</div>
-                <div style={styles.cardValue}>{card.value}</div>
-              </div>
-            ))}
+          <div style={styles.card}>
+            <h3 style={styles.cardTitle}>Preliminary Diagnosis</h3>
+            <p style={styles.diagnosisText}>{diagnosis}</p>
           </div>
 
-          <div style={styles.diagnosisBox}>
-            <strong>Preliminary Diagnosis:</strong> {preliminaryDiagnosis()}
-          </div>
-
-          <div style={styles.chartContainer}>
-            <Line data={generateChartData()} options={{
-              responsive: true,
-              plugins: { legend: { position: 'top' } },
-              scales: {
-                x: { title: { display: true, text: 'Frame Number' } },
-                y: { title: { display: true, text: 'Pupil Size (mm)' } }
-              }
-            }} />
-          </div>
-
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  {Object.keys(csvData[0]).map((key, idx) => (
-                    <th key={idx}>{key}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {csvData.slice(0, 10).map((row, idx) => (
-                  <tr key={idx}>
-                    {Object.values(row).map((val, i) => (
-                      <td key={i}>{val}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p style={styles.note}>Showing first 10 rows for preview.</p>
-          </div>
-
-          <div style={{ textAlign: 'center', marginTop: '30px' }}>
-            <button onClick={exportCSV} style={styles.downloadButton}>
-              ⬇️ Download JSON
-            </button>
+          <div style={styles.chartWrapper}>
+            <Bar data={chartData} options={chartOptions} />
           </div>
         </>
       )}
@@ -181,97 +124,61 @@ const ParkinsonAnalysis = () => {
 
 const styles = {
   container: {
-    padding: '1rem',
+    padding: '20px 10px',
+    maxWidth: '100%',
+    margin: '0 auto',
     fontFamily: 'Segoe UI, sans-serif',
-    background: '#ffffff',
-    color: '#2E4057',
-    maxWidth: 900,
-    margin: '0 auto'
+    background: '#FFFFFF',
   },
   title: {
-    fontSize: '1.8rem',
+    textAlign: 'center',
     color: '#1B5A72',
-    textAlign: 'center',
-    marginBottom: '0.5rem'
+    fontSize: 'clamp(1.5rem, 5vw, 2rem)',
+    marginBottom: '20px',
   },
-  subtitle: {
-    fontSize: '1rem',
+  text: {
     textAlign: 'center',
-    marginBottom: '1rem'
+    color: '#333',
+    fontSize: '1rem',
+    marginBottom: '1.5rem',
   },
   button: {
+    display: 'block',
     backgroundColor: '#1B5A72',
     color: '#fff',
-    padding: '0.75rem 1.25rem',
-    fontSize: '1rem',
+    padding: '0.75rem 1.5rem',
     borderRadius: '8px',
+    fontSize: '16px',
+    fontWeight: 500,
     cursor: 'pointer',
-    display: 'block',
-    margin: '0 auto'
-  },
-  filename: {
-    textAlign: 'center',
-    fontStyle: 'italic',
-    marginTop: '0.5rem'
-  },
-  cardRow: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: '12px',
-    marginTop: '1.5rem'
+    boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+    margin: '0 auto 2rem',
   },
   card: {
     backgroundColor: '#D9F1FF',
     padding: '16px',
     borderRadius: '10px',
-    minWidth: '120px',
+    margin: '0 auto 20px',
+    maxWidth: '480px',
     textAlign: 'center',
-    color: '#2E4057',
-    flex: '1 0 40%',
-    maxWidth: '160px'
   },
-  cardLabel: {
-    fontSize: '0.9rem'
-  },
-  cardValue: {
+  cardTitle: {
     fontSize: '1.2rem',
-    fontWeight: 'bold'
+    color: '#2E4057',
+    marginBottom: '0.5rem',
   },
-  diagnosisBox: {
-    background: '#fffbe6',
-    padding: '1rem',
-    border: '1px solid #ffd66b',
-    borderRadius: '8px',
-    marginTop: '1.5rem',
-    textAlign: 'center',
-    fontSize: '1rem'
-  },
-  chartContainer: {
-    marginTop: '2rem'
-  },
-  tableWrapper: {
-    marginTop: '2rem',
-    overflowX: 'auto'
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '0.9rem'
-  },
-  note: {
-    marginTop: '0.5rem',
-    fontSize: '13px',
-    color: '#888'
-  },
-  downloadButton: {
-    padding: '12px 24px',
+  diagnosisText: {
     fontSize: '1rem',
-    borderRadius: '6px',
-    border: 'none',
-    background: '#1B5A72',
-    color: 'white',
-    cursor: 'pointer'
+    fontWeight: 500,
+    color: '#2E4057',
+  },
+  chartWrapper: {
+    maxWidth: '800px',
+    margin: '0 auto',
+    background: '#fff',
+    padding: '20px',
+    borderRadius: '10px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
   }
 };
 
