@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Line } from 'react-chartjs-2';
 import { saveAs } from 'file-saver';
+import { CSVLink } from 'react-csv';
 import {
   Chart as ChartJS,
   LineElement,
@@ -11,6 +12,7 @@ import {
   Legend,
   CategoryScale
 } from 'chart.js';
+import zoomPlugin from 'chartjs-plugin-zoom';
 
 ChartJS.register(
   LineElement,
@@ -19,12 +21,16 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  CategoryScale
+  CategoryScale,
+  zoomPlugin
 );
 
 const ParkinsonAnalysis = () => {
   const [csvData, setCsvData] = useState(null);
   const [filename, setFilename] = useState('');
+  const [showLeft, setShowLeft] = useState(true);
+  const [showRight, setShowRight] = useState(true);
+  const [chartRef, setChartRef] = useState(null);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -81,25 +87,52 @@ const ParkinsonAnalysis = () => {
 
   const generateChartData = () => {
     const frames = csvData.map((d) => d['Frame Number']);
-    const left = csvData.map((d) => parseFloat(d['Left Pupil Size (mm)']));
-    const right = csvData.map((d) => parseFloat(d['Right Pupil Size (mm)']));
+    const datasets = [];
+
+    if (showLeft) {
+      datasets.push({
+        label: 'Left Pupil Size',
+        data: csvData.map((d) => parseFloat(d['Left Pupil Size (mm)'])),
+        borderColor: '#1B5A72',
+        fill: false
+      });
+    }
+
+    if (showRight) {
+      datasets.push({
+        label: 'Right Pupil Size',
+        data: csvData.map((d) => parseFloat(d['Right Pupil Size (mm)'])),
+        borderColor: '#4ED8C3',
+        fill: false
+      });
+    }
+
     return {
       labels: frames,
-      datasets: [
-        {
-          label: 'Left Pupil Size',
-          data: left,
-          borderColor: '#1B5A72',
-          fill: false
-        },
-        {
-          label: 'Right Pupil Size',
-          data: right,
-          borderColor: '#4ED8C3',
-          fill: false
-        }
-      ]
+      datasets
     };
+  };
+
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top' },
+      zoom: {
+        zoom: {
+          wheel: { enabled: true },
+          pinch: { enabled: true },
+          mode: 'xy'
+        },
+        pan: {
+          enabled: true,
+          mode: 'xy'
+        }
+      }
+    },
+    scales: {
+      x: { title: { display: true, text: 'Frame Number' }, ticks: { color: '#2E4057' } },
+      y: { title: { display: true, text: 'Pupil Size (mm)' }, ticks: { color: '#2E4057' } }
+    }
   };
 
   return (
@@ -133,21 +166,31 @@ const ParkinsonAnalysis = () => {
             <strong>Preliminary Diagnosis:</strong> {preliminaryDiagnosis()}
           </div>
 
-          <div style={styles.chartContainer}>
-            <Line data={generateChartData()} options={{
-              responsive: true,
-              plugins: { legend: { position: 'top' } },
-              scales: {
-                x: { title: { display: true, text: 'Frame Number' }, ticks: { color: '#2E4057' } },
-                y: { title: { display: true, text: 'Pupil Size (mm)' }, ticks: { color: '#2E4057' } }
-              }
-            }} />
+          <div style={styles.toggleRow}>
+            <label>
+              <input type="checkbox" checked={showLeft} onChange={() => setShowLeft(!showLeft)} />
+              Left
+            </label>
+            <label>
+              <input type="checkbox" checked={showRight} onChange={() => setShowRight(!showRight)} />
+              Right
+            </label>
+            <button onClick={() => chartRef?.resetZoom()} style={styles.resetButton}>Reset Zoom</button>
           </div>
 
-          <div style={{ textAlign: 'center', marginTop: '30px' }}>
-            <button onClick={exportJSON} style={styles.downloadButton}>
-              ⬇️ Download JSON
-            </button>
+          <div style={styles.chartContainer}>
+            <Line
+              data={generateChartData()}
+              options={chartOptions}
+              ref={(chart) => setChartRef(chart?.chartInstance || chart)}
+            />
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button onClick={exportJSON} style={styles.downloadButton}>⬇️ Download JSON</button>
+            <CSVLink data={csvData} filename="parkinson_analysis.csv" style={styles.downloadButton}>
+              ⬇️ Download CSV
+            </CSVLink>
           </div>
         </>
       )}
@@ -223,7 +266,28 @@ const styles = {
     textAlign: 'center',
     fontSize: '1rem'
   },
+  toggleRow: {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '16px',
+    marginTop: '1rem',
+    alignItems: 'center'
+  },
+  resetButton: {
+    padding: '6px 12px',
+    backgroundColor: '#4ED8C3',
+    color: '#fff',
+    borderRadius: '6px',
+    border: 'none',
+    cursor: 'pointer'
+  },
   chartContainer: {
+    marginTop: '2rem'
+  },
+  buttonRow: {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '12px',
     marginTop: '2rem'
   },
   downloadButton: {
