@@ -78,7 +78,7 @@ const handleUpload = async () => {
   const fetchResults = useCallback(async () => {
     setLoadingResults(true);
     try {
-      const res = await fetch(`${apiBase}/food/results`);
+      const res = await fetch(`${apiBase}/api/food/results`);
       const items = await res.json();
       setData(items);
     } catch (err) {
