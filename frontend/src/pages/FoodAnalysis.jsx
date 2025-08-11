@@ -28,9 +28,9 @@ const handleUpload = async () => {
   formData.append('image', selectedFile);
 
   try {
-    console.log('📤 Uploading to:', `${apiBase}/food/upload`);
+    console.log('📤 Uploading to:', `${apiBase}/api/food/upload`);
 
-    const res = await fetch(`${apiBase}/food/upload`, {
+    const res = await fetch(`${apiBase}/api/food/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -49,7 +49,7 @@ const handleUpload = async () => {
       return;
     }
 
-    const enqueueRes = await fetch(`${apiBase}/queue/enqueue`, {
+    const enqueueRes = await fetch(`${apiBase}/api/queue/enqueue`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageUrl: result.imageUrl }),
