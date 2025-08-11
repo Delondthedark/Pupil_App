@@ -48,3 +48,8 @@ coverage/
 htmlcov/
 .cache/
 
+backend/.env
+backend/.env.save
+backend/uploads/
+uploads/
+
