@@ -22,6 +22,14 @@ app.use(cors({
 // Parse incoming JSON
 app.use(express.json({ limit: '50mb' }));
 
+app.use((req, _, next) => {
+  if (req.path.startsWith('/sleep')) {
+    console.log(`[sleep] ${req.method} ${req.path}`);
+  }
+  next();
+});
+
+
 // ✅ Attach DB pool to every request (for /api/sleep)
 app.use((req, res, next) => {
   req.pool = pool;
