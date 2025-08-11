@@ -1,7 +1,0 @@
-PORT=3001
-PGUSER=myuser
-PGHOST=localhost
-PGDATABASE=mydb
-PGPASSWORD=yourpassword
-PGPORT=5432
-BASE_URL=https://carb-hon-once-she.trycloudflare.com
