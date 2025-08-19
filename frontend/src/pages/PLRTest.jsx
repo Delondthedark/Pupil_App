@@ -26,13 +26,9 @@ const PLRTest = () => {
   useEffect(() => {
     let interval;
     if (isRunning) {
-      // Start flashing light sequence
       setShowFlash(true);
-      setTimeout(() => {
-        setShowFlash(false);
-      }, 3000); // flash for 3 seconds
+      setTimeout(() => setShowFlash(false), 3000);
 
-      // Start sending frames to backend
       interval = setInterval(() => {
         sendFrame();
       }, 300);
@@ -90,31 +86,32 @@ const PLRTest = () => {
         Measures pupil response to a light stimulus by analyzing size changes in real-time.
       </p>
 
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{ ...styles.video, visibility: 'hidden', position: 'absolute' }}
-      />
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <div style={styles.camera}>
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          style={{ ...styles.video, visibility: 'hidden', position: 'absolute' }}
+        />
+        <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <button onClick={handleToggle} style={styles.button}>
-        {isRunning ? 'Stop Test' : 'Start Test'}
-      </button>
+        <button onClick={handleToggle} style={styles.button}>
+          {isRunning ? 'Stop Test' : 'Start Test'}
+        </button>
 
-      {processedImg && isRunning && (
-        <div>
-          <img src={processedImg} alt="Pupil Frame" style={styles.image} />
-          <p style={styles.pupilText}>👁️ Left: {leftSize} | Right: {rightSize}</p>
-        </div>
-      )}
+        {processedImg && isRunning && (
+          <div>
+            <img src={processedImg} alt="Pupil Frame" style={styles.image} />
+            <p style={styles.pupilText}>👁️ Left: {leftSize} | Right: {rightSize}</p>
+          </div>
+        )}
 
-      {!isRunning && (
-        <div style={styles.placeholder}>Camera ready. Press Start Test.</div>
-      )}
+        {!isRunning && (
+          <div style={styles.placeholder}>Camera ready. Press Start Test.</div>
+        )}
+      </div>
 
-      {/* Flash overlay during light stimulus */}
       {showFlash && <div style={styles.flashOverlay}></div>}
     </div>
   );
@@ -136,6 +133,11 @@ const styles = {
     fontSize: '16px',
     color: '#666',
     marginBottom: '1rem',
+  },
+  camera: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center', // horizontal center (same as EyeDirection)
   },
   video: {
     width: '100%',

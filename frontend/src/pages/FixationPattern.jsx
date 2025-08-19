@@ -25,7 +25,7 @@ const FixationPattern = () => {
     if (isRunning) {
       interval = setInterval(() => {
         sendFrame();
-      }, 300); // ~3 FPS
+      }, 300);
     }
     return () => clearInterval(interval);
   }, [isRunning]);
@@ -82,26 +82,28 @@ const FixationPattern = () => {
     <div style={styles.container}>
       <h2 style={styles.title}>👁️ Fixation & Gaze Shift Analysis</h2>
 
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{ ...styles.video, visibility: 'hidden', position: 'absolute' }}
-      />
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <div style={styles.camera}>
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          style={{ ...styles.video, visibility: 'hidden', position: 'absolute' }}
+        />
+        <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <button onClick={handleToggle} style={styles.button}>
-        {isRunning ? 'Stop Analysis' : 'Start Analysis'}
-      </button>
+        <button onClick={handleToggle} style={styles.button}>
+          {isRunning ? 'Stop Analysis' : 'Start Analysis'}
+        </button>
 
-      {processedImg && isRunning && (
-        <img src={processedImg} alt="Fixation Result" style={styles.image} />
-      )}
+        {processedImg && isRunning && (
+          <img src={processedImg} alt="Fixation Result" style={styles.image} />
+        )}
 
-      {!isRunning && (
-        <div style={styles.placeholder}>Camera ready. Press Start.</div>
-      )}
+        {!isRunning && (
+          <div style={styles.placeholder}>Camera ready. Press Start.</div>
+        )}
+      </div>
     </div>
   );
 };
@@ -117,6 +119,11 @@ const styles = {
     fontWeight: 600,
     color: '#1B5A72',
     marginBottom: '1rem',
+  },
+  camera: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center', // matches EyeDirection
   },
   video: {
     width: '100%',

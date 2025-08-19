@@ -48,7 +48,7 @@ export default function Login() {
         </h2>
         <p style={styles.subtitle}>
           {mode === 'login'
-            ? 'Sign in to access your dashboard'
+            ? 'Login to access your dashboard'
             : 'Sign up to start using Humanity Vision'}
         </p>
 
@@ -81,7 +81,7 @@ export default function Login() {
                 ? 'Signing in...'
                 : 'Creating...'
               : mode === 'login'
-              ? 'Sign In'
+              ? 'Login'
               : 'Sign Up'}
           </button>
         </form>
