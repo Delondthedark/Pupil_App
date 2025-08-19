@@ -6,6 +6,8 @@ import foodRouter from './routes/food.js';
 import foodImageQueue from './routes/foodImageQueue.js';
 import sleepRouter from './routes/sleep.js';
 import authRouter from './routes/auth.js';
+import parkinsonAnalyze from './routes/parkinsonAnalyze.js';
+import ingestRouter from './routes/ingest.js';
 
 dotenv.config();
 
@@ -16,7 +18,7 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   credentials: true,
 }));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '80mb' }));
 
 // Attach DB pool
 app.use((req, _, next) => { req.pool = pool; next(); });
@@ -29,6 +31,8 @@ app.use(['/food', '/api/food'], foodRouter);
 app.use(['/queue', '/api/queue'], foodImageQueue);
 app.use(['/sleep', '/api/sleep'], sleepRouter);
 app.use(['/auth', '/api/auth'], authRouter);
+app.use('/parkinson', parkinsonAnalyze); 
+app.use('/api/ingest', ingestRouter);
 
 // Start
 app.listen(PORT, '0.0.0.0', () =>

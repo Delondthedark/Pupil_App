@@ -16,6 +16,7 @@ const AppLayout = () => {
     { label: 'PLR Test', path: '/plr' },
     { label: 'Eye Direction', path: '/eye-direction' },
     { label: 'Parkinson Analysis', path: '/parkinson' },
+    { label: 'Parkinson CSV', path: '/parkinson-csv' },
   ] : [];
 
   const handleNavigate = (path) => {

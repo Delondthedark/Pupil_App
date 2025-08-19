@@ -12,6 +12,7 @@ import ParkinsonAnalysis from './pages/ParkinsonAnalysis';
 import { AuthProvider } from './auth/AuthContext';
 import PrivateRoute from './auth/PrivateRoute';
 import Login from './pages/Login';
+import ParkinsonCsvAnalyze from './pages/ParkinsonCsvAnalyze';
 
 function App() {
   return (
@@ -39,6 +40,7 @@ function App() {
             <Route path="food" element={<PrivateRoute><FoodAnalysis /></PrivateRoute>} />
             <Route path="eye-direction" element={<PrivateRoute><EyeDirection /></PrivateRoute>} />
             <Route path="parkinson" element={<PrivateRoute><ParkinsonAnalysis /></PrivateRoute>} />
+            <Route path="parkinson-csv" element={<PrivateRoute><ParkinsonCsvAnalyze /></PrivateRoute>} />
           </Route>
 
           {/* Fallback */}
