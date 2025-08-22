@@ -1,98 +1,252 @@
-// backend/services/parkinsonAnalyzer.js
+// backend/services/ParkinsonAnalyzer.js
+// ESM module
 import { parse } from 'csv-parse/sync';
 
-const NUM = (v) => {
-  const n = typeof v === 'string' ? v.trim() : v;
-  const x = Number(n);
-  return Number.isFinite(x) ? x : NaN;
+/** -------- Utilities -------- */
+const toNum = (v) => {
+  if (v == null) return NaN;
+  const s = String(v).replace(/[^\d.\-eE]/g, '');
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : NaN;
 };
-const mean = (arr) => arr.reduce((a,b)=>a+b,0) / (arr.length || 1);
-const std = (arr) => {
-  const m = mean(arr);
-  return Math.sqrt(arr.reduce((s,v)=>s + Math.pow(v - m, 2), 0) / (arr.length || 1));
-};
-function pearson(x, y) {
+const mean = (a) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
+const std = (a, m = mean(a)) =>
+  Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / (a.length || 1));
+
+const pearson = (x, y) => {
   const n = Math.min(x.length, y.length);
-  if (n === 0) return NaN;
-  const mx = mean(x), my = mean(y);
+  if (!n) return NaN;
+  const mx = mean(x.slice(0, n));
+  const my = mean(y.slice(0, n));
   let num = 0, dx = 0, dy = 0;
   for (let i = 0; i < n; i++) {
     const a = x[i] - mx;
     const b = y[i] - my;
-    num += a * b;
-    dx  += a * a;
-    dy  += b * b;
+    num += a * b; dx += a * a; dy += b * b;
   }
   const den = Math.sqrt(dx * dy);
-  return den === 0 ? NaN : (num / den);
-}
-function normalizeHeader(h) {
-  const k = h.trim().toLowerCase();
-  if (k.includes('timestamp')) return 'timestamp';
-  if (k.includes('frame')) return 'frame';
-  if (k.includes('left pupil') && k.includes('mm')) return 'lmm';
-  if (k.includes('right pupil') && k.includes('mm')) return 'rmm';
-  if (k.includes('brightness')) return 'brightness';
-  if (k.includes('illuminance')) return 'illuminance';
-  return k;
+  return den ? num / den : NaN;
+};
+
+const safeRound = (x, d = 3) => (Number.isFinite(x) ? Number(x.toFixed(d)) : null);
+const normKey = (k) => (k || '').toLowerCase().trim();
+
+/** Map header names robustly */
+function mapColumns(row0) {
+  const col = {};
+  for (const key of Object.keys(row0)) {
+    const nk = normKey(key);
+    if (nk.includes('frame')) col.frame = key;
+    if (nk.includes('left') && nk.includes('pupil')) col.left = key;
+    if (nk.includes('right') && nk.includes('pupil')) col.right = key;
+    if (nk.includes('bright')) col.brightness = key;
+    if (nk.includes('illuminance') || nk.includes('lux')) col.ill = key;
+  }
+  if (!col.left || !col.right) throw new Error('CSV must include Left/Right Pupil Size columns');
+  return col;
 }
 
-export function analyzeCsvBuffer(buf, fps = 30) {
-  const text = buf.toString('utf8');
-  const records = parse(text, { columns: true, skip_empty_lines: true });
-  const rows = records.map((row) => {
-    const out = {};
-    for (const [k, v] of Object.entries(row)) out[normalizeHeader(k)] = v;
-    return out;
-  });
+/** Downsample for UI */
+function downsample(series, maxPts = 200) {
+  const step = Math.max(1, Math.floor(series.length / maxPts));
+  const out = [];
+  for (let i = 0; i < series.length; i += step) {
+    const s = series[i];
+    out.push({ frame: s.frame, left_mm: s.left, right_mm: s.right });
+  }
+  return out;
+}
 
-  const left = [], right = [], bright = [], illum = [], frames = [];
-  for (const r of rows) {
-    const l = NUM(r.lmm); if (!Number.isNaN(l)) left.push(l);
-    const rr = NUM(r.rmm); if (!Number.isNaN(rr)) right.push(rr);
-    const b = NUM(r.brightness); if (!Number.isNaN(b)) bright.push(b);
-    const i = NUM(r.illuminance); if (!Number.isNaN(i)) illum.push(i);
-    const f = NUM(r.frame); if (!Number.isNaN(f)) frames.push(f);
+/** Helpers for scoring */
+const lin = (x, a, b) => {
+  if (!Number.isFinite(x)) return 0;
+  if (a === b) return 0;
+  const t = (x - a) / (b - a);
+  return Math.max(0, Math.min(1, t));
+};
+const tri = (x, c, w) => {
+  if (!Number.isFinite(x)) return 0;
+  const d = Math.abs(x - c);
+  return Math.max(0, 1 - d / w);
+};
+
+// short-term variability as rolling window std (window ~5)
+function shortTermVar(arr) {
+  const w = 5;
+  if (arr.length < 2) return 0;
+  const out = [];
+  for (let i = 0; i < arr.length; i++) {
+    const s = Math.max(0, i - Math.floor(w / 2));
+    const e = Math.min(arr.length, s + w);
+    const seg = arr.slice(s, e);
+    out.push(std(seg));
+  }
+  return mean(out || [0]);
+}
+
+/** -------- Heuristic scoring for 4 conditions --------
+ *  PRELIMINARY, non-diagnostic indicators. Tunable thresholds.
+ */
+function scoreConditions({ leftArr, rightArr, brightArr }) {
+  const Lm = mean(leftArr);
+  const Rm = mean(rightArr);
+  const Ls = std(leftArr, Lm);
+  const Rs = std(rightArr, Rm);
+  const asym = Math.abs(Lm - Rm);
+
+  const varAvg = (Ls + Rs) / 2;
+  const stv = (shortTermVar(leftArr) + shortTermVar(rightArr)) / 2;
+
+  // brightness correlation if complete
+  let corrL = NaN, corrR = NaN, corrAvg = NaN;
+  const haveFullBrightness = Array.isArray(brightArr) && brightArr.length === leftArr.length;
+  if (haveFullBrightness) {
+    corrL = pearson(brightArr, leftArr);
+    corrR = pearson(brightArr, rightArr);
+    corrAvg = (corrL + corrR) / 2;
   }
 
-  const leftMean = left.length ? Number(mean(left).toFixed(3)) : null;
-  const rightMean = right.length ? Number(mean(right).toFixed(3)) : null;
-  const leftStd  = left.length ? Number(std(left).toFixed(3)) : null;
-  const rightStd = right.length ? Number(std(right).toFixed(3)) : null;
-  const corrBLeft  = Number(pearson(bright, left).toFixed(3));
-  const corrBRight = Number(pearson(bright, right).toFixed(3));
-  const corrILeft  = Number(pearson(illum, left).toFixed(3));
-  const corrIRight = Number(pearson(illum, right).toFixed(3));
-  const asym = (leftMean != null && rightMean != null) ? Number(Math.abs(leftMean - rightMean).toFixed(3)) : null;
+  // ---- Scoring (0..1) ----
+  // Parkinson: very low variability; weak |corr|; penalize asymmetry
+  const parkLowVar   = lin(0.08 - varAvg, 0, 0.08);                 // 1 @ 0, 0 @ >=0.08
+  const parkWeakCorr = haveFullBrightness ? lin(0.3 - Math.abs(corrAvg), 0, 0.3) : 0.5;
+  const parkAsymPen  = 1 - lin(asym, 0.25, 1.2);
+  const parkinsonScore = 0.6 * parkLowVar + 0.25 * parkWeakCorr + 0.15 * parkAsymPen;
 
-  let durationSec = null;
-  if (frames.length) {
-    const minF = Math.min(...frames);
-    const maxF = Math.max(...frames);
-    durationSec = Number(((maxF - minF + 1) / fps).toFixed(2));
+  // Alzheimer’s: strong asymmetry + moderate variability; weak corr slightly preferred
+  const alzAsym   = lin(asym, 0.3, 1.2);
+  const alzVarMid = tri(varAvg, 0.22, 0.12);
+  const alzWeakC  = haveFullBrightness ? lin(0.25 - Math.abs(corrAvg), 0, 0.25) : 0.4;
+  const alzScore  = 0.6 * alzAsym + 0.3 * alzVarMid + 0.1 * alzWeakC;
+
+  // High Stress: high short-term variability + large |corr| + higher overall var
+  const stressSTV  = lin(stv, 0.15, 0.55);
+  const stressCorr = haveFullBrightness ? lin(Math.abs(corrAvg), 0.15, 0.6) : 0.3;
+  const stressVar  = lin(varAvg, 0.15, 0.6);
+  const stressScore = 0.5 * stressSTV + 0.3 * stressCorr + 0.2 * stressVar;
+
+  // PTSD: negative correlation + moderate variability + small asymmetry
+  const negCorr   = haveFullBrightness ? lin(-corrAvg, 0.15, 0.6) : 0;
+  const varMid    = tri(varAvg, 0.22, 0.12);
+  const asymSmall = 1 - lin(asym, 0.25, 1.0);
+  const ptsdScore = 0.6 * negCorr + 0.25 * varMid + 0.15 * asymSmall;
+
+  const raw = {
+    parkinson: Math.max(0, Math.min(1, parkinsonScore)),
+    alzheimers: Math.max(0, Math.min(1, alzScore)),
+    stress: Math.max(0, Math.min(1, stressScore)),
+    ptsd: Math.max(0, Math.min(1, ptsdScore)),
+  };
+
+  // confidences (normalized 0..1)
+  const total = Object.values(raw).reduce((a, b) => a + b, 0) || 1;
+  const conf = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Number((v / total).toFixed(3))]));
+
+  // choose primary (require minimum signal)
+  let primary = 'clear';
+  let maxK = null, maxV = -1;
+  for (const [k, v] of Object.entries(raw)) {
+    if (v > maxV) { maxV = v; maxK = k; }
   }
-
-  const reasons = [];
-  if (asym != null && asym > 0.5) reasons.push('Left/Right asymmetry > 0.5 mm');
-  if (leftStd != null && leftStd < 0.1) reasons.push('Left pupil variability very low');
-  if (rightStd != null && rightStd < 0.1) reasons.push('Right pupil variability very low');
-  const corrFlags = [corrBLeft, corrBRight, corrILeft, corrIRight].filter(v => Number.isFinite(v) && Math.abs(v) >= 0.2);
-  if (corrFlags.length) reasons.push('Pupil size correlated with brightness/illuminance');
-
-  const diagnosis = reasons.length ? 'review_recommended' : 'ok';
+  if (maxV >= 0.35) primary = maxK;
 
   return {
-    n_rows: rows.length,
-    duration_sec: durationSec,
     summary: {
-      left: { mean: leftMean, std: leftStd },
-      right: { mean: rightMean, std: rightStd },
-      asym_mm: asym,
-      brightness_corr: { left: corrBLeft, right: corrBRight },
-      illuminance_corr: { left: corrILeft, right: corrIRight },
-      fps
+      left:  { mean: safeRound(Lm), std: safeRound(Ls) },
+      right: { mean: safeRound(Rm), std: safeRound(Rs) },
+      asym_mm: safeRound(asym),
+      brightness_corr: {
+        left:  safeRound(corrL),
+        right: safeRound(corrR),
+      },
+      short_term_variability: safeRound(stv),
     },
-    diagnosis,
-    reasons
+    primary,
+    scores: raw,
+    confidences: conf,
+  };
+}
+
+/** -------- Public: analyzeCsvBuffer -------- */
+export function analyzeCsvBuffer(csvBuffer) {
+  const text = csvBuffer.toString('utf8');
+  const rows = parse(text, { columns: true, skip_empty_lines: true, trim: true });
+  if (!rows.length) throw new Error('CSV is empty');
+
+  const col = mapColumns(rows[0]);
+
+  // Build numeric series (keep only rows with both pupils numeric)
+  const series = [];
+  for (const r of rows) {
+    const frame = col.frame ? toNum(r[col.frame]) : series.length;
+    const left = toNum(r[col.left]);
+    const right = toNum(r[col.right]);
+    const bright = col.brightness ? toNum(r[col.brightness]) : NaN;
+    if (Number.isFinite(left) && Number.isFinite(right)) {
+      series.push({ frame, left, right, bright });
+    }
+  }
+  if (!series.length) throw new Error('No valid numeric rows found');
+
+  const leftArr = series.map(s => s.left);
+  const rightArr = series.map(s => s.right);
+
+  // brightness array only if all rows have finite values
+  const haveFullBrightness = series.every(s => Number.isFinite(s.bright));
+  const brightArr = haveFullBrightness ? series.map(s => s.bright) : null;
+
+  // Score conditions
+  const scored = scoreConditions({ leftArr, rightArr, brightArr });
+
+  // Reasons (human readable)
+  const reasons = [];
+  const { left, right, asym_mm, brightness_corr, short_term_variability } = scored.summary;
+  if (scored.primary === 'parkinson') {
+    if ((left?.std ?? 1) < 0.08 || (right?.std ?? 1) < 0.08) reasons.push('Very low pupil variability');
+    if ((asym_mm ?? 0) > 0.5) reasons.push('Asymmetry present but Parkinson favored by flat response');
+    if (brightness_corr && (Math.abs(brightness_corr.left ?? 0) < 0.1 && Math.abs(brightness_corr.right ?? 0) < 0.1)) {
+      reasons.push('Weak correlation with brightness');
+    }
+  }
+  if (scored.primary === 'alzheimers') {
+    if ((asym_mm ?? 0) > 0.5) reasons.push(`Left/Right asymmetry ${asym_mm} mm > 0.5 mm`);
+    if ((left?.std ?? 0) > 0.08 && (right?.std ?? 0) > 0.08) reasons.push('Moderate variability (not ultra-flat)');
+  }
+  if (scored.primary === 'stress') {
+    if ((short_term_variability ?? 0) > 0.25) reasons.push(`High short-term variability ~ ${short_term_variability}`);
+    if (brightness_corr && (Math.abs(brightness_corr.left ?? 0) > 0.2 || Math.abs(brightness_corr.right ?? 0) > 0.2)) {
+      reasons.push('Pupil size tracks brightness strongly');
+    }
+  }
+  if (scored.primary === 'ptsd') {
+    const l = brightness_corr?.left ?? 0, r = brightness_corr?.right ?? 0;
+    if (l < -0.15 || r < -0.15) reasons.push(`Inverse brightness correlation (L=${l}, R=${r})`);
+    if ((asym_mm ?? 0) < 0.3) reasons.push('Small asymmetry');
+  }
+  if (!reasons.length) reasons.push('No strong single indicator; overall response looks typical');
+
+  // Compose final response
+  const samples = downsample(series);
+
+  const conditions = Object.entries(scored.confidences).map(([condition, confidence]) => ({
+    condition,                                  // 'parkinson' | 'alzheimers' | 'stress' | 'ptsd'
+    confidence: Number(confidence),             // 0..1 normalized
+    score: Number(scored.scores[condition].toFixed(3)), // raw score 0..1
+  }));
+
+  // Map primary to UI-friendly string
+  let diag = scored.primary;
+  if (diag === 'parkinson') diag = 'Parkinson';
+  else if (diag === 'alzheimers') diag = "Alzheimer's";
+  else if (diag === 'stress') diag = 'Stress';
+  else if (diag === 'ptsd') diag = 'PTSD';
+
+  return {
+    n_rows: series.length,
+    summary: scored.summary,
+    diagnosis: diag,   // string only (UI-safe)
+    conditions,
+    reasons,
+    samples,
   };
 }

@@ -1,26 +1,41 @@
-import React, { useState } from 'react';
+// src/pages/ParkinsonCsvAnalyze.jsx
+import React, { useMemo, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 
 export default function ParkinsonCsvAnalyze() {
-  const API = process.env.REACT_APP_API_BASE_URL; // e.g. http://localhost:3001
+  const API = process.env.REACT_APP_API_BASE_URL;       // e.g. http://localhost:3001
   const DEFAULT_SECRET = process.env.REACT_APP_INGEST_SECRET || '';
   const { token } = useAuth();
+
+  // UI + state
+  const [mode, setMode] = useState('test');             // 'test' | 'partner'
+  const [secret, setSecret] = useState(DEFAULT_SECRET);
+  const [analyze, setAnalyze] = useState(true);
+  const [metaText, setMetaText] = useState('{\n  "patientId": "P001",\n  "testId": "abc123"\n}');
 
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
-  // new controls
-  const [mode, setMode] = useState('test'); // 'test' | 'partner'
-  const [secret, setSecret] = useState(DEFAULT_SECRET);
-  const [analyze, setAnalyze] = useState(true);
-  const [metaText, setMetaText] = useState('{\n  "patientId": "P001",\n  "testId": "abc123"\n}');
+  const fileInputRef = useRef(null);
+  const endpoint = mode === 'partner' ? `${API}/api/ingest` : `${API}/api/ingest/test`;
 
-  const onPick = (e) => {
+  // --- helpers ---
+  const fileToBase64 = (f) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const s = String(reader.result || '');
+        resolve(s.includes(',') ? s.split(',')[1] : s);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(f);
+    });
+
+  const onPick = (f) => {
     setResult(null);
     setError('');
-    const f = e.target.files?.[0];
     if (!f) return;
     if (!f.name.toLowerCase().endsWith('.csv')) {
       setError('Please select a .csv file.');
@@ -29,24 +44,29 @@ export default function ParkinsonCsvAnalyze() {
     setFile(f);
   };
 
-  const fileToBase64 = (f) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        // result like "data:text/csv;base64,AAAA"; we only want the base64 part after the comma
-        const s = String(reader.result || '');
-        const b64 = s.includes(',') ? s.split(',')[1] : s;
-        resolve(b64);
-      };
-      reader.onerror = (e) => reject(e);
-      reader.readAsDataURL(f);
-    });
+  const onBrowse = (e) => onPick(e.target.files?.[0]);
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const f = e.dataTransfer?.files?.[0];
+    onPick(f);
+  };
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const clearFile = () => {
+    setFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setResult(null);
-
     if (!file) {
       setError('Choose a CSV file first.');
       return;
@@ -54,70 +74,53 @@ export default function ParkinsonCsvAnalyze() {
 
     try {
       setBusy(true);
-
-      const endpoint =
-        mode === 'partner' ? `${API}/api/ingest` : `${API}/api/ingest/test`;
-
       let res;
 
       if (mode === 'partner') {
-        // build JSON body with base64 + optional meta + analyze
         let meta = {};
         if (metaText.trim()) {
-          try {
-            meta = JSON.parse(metaText);
-          } catch {
-            throw new Error('Meta must be valid JSON.');
-          }
+          try { meta = JSON.parse(metaText); }
+          catch { throw new Error('Meta must be valid JSON.'); }
         }
-        if (!secret) {
-          throw new Error('Shared secret is required in Partner mode.');
-        }
+        if (!secret) throw new Error('Shared secret is required in Partner mode.');
 
         const fileBase64 = await fileToBase64(file);
-
         res = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-Shared-Secret': secret,
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
           },
           body: JSON.stringify({
             fileName: file.name,
             fileBase64,
             contentType: 'text/csv',
             meta,
-            analyze,
-          }),
+            analyze
+          })
         });
       } else {
-        // test mode: multipart upload
         const fd = new FormData();
         fd.append('file', file, file.name);
         res = await fetch(endpoint, {
           method: 'POST',
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          body: fd,
+          body: fd
         });
       }
 
       const text = await res.text();
       let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
+      try { data = JSON.parse(text); }
+      catch {
         if (!res.ok) {
-          throw new Error(
-            `Upload failed (${res.status}). Raw response: ${text.slice(0, 200)}…`
-          );
+          throw new Error(`Upload failed (${res.status}). Raw response: ${text.slice(0, 240)}…`);
         } else {
           throw new Error('Unexpected response (not JSON).');
         }
       }
-      if (!res.ok) {
-        throw new Error(data?.error || `Upload failed (${res.status})`);
-      }
+      if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
       setResult(data);
     } catch (err) {
       setError(err.message || 'Upload failed');
@@ -127,10 +130,9 @@ export default function ParkinsonCsvAnalyze() {
   };
 
   const downloadJSON = () => {
-    if (!result) return;
-    const blob = new Blob([JSON.stringify(result, null, 2)], {
-      type: 'application/json',
-    });
+    const view = result?.analysis ?? result ?? null;
+    if (!view) return;
+    const blob = new Blob([JSON.stringify(view, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -139,206 +141,401 @@ export default function ParkinsonCsvAnalyze() {
     URL.revokeObjectURL(url);
   };
 
-  // Normalize result: backend may return {analysis:{...}} or top-level
-  const view = result?.analysis ?? result ?? null;
+  // Normalize for display
+  const view = useMemo(() => result?.analysis ?? result ?? null, [result]);
+
+  // Derive a clean diagnosis label + style (handles string OR {condition, confidence})
+  const diagKey = useMemo(() => {
+    if (!view?.diagnosis) return '';
+    return typeof view.diagnosis === 'string'
+      ? view.diagnosis
+      : (view.diagnosis.condition || 'review_recommended');
+  }, [view]);
+
+  const diagLabel = useMemo(() => {
+    if (!view?.diagnosis) return '—';
+    if (typeof view.diagnosis === 'string') return view.diagnosis;
+    const pct = Number.isFinite(view.diagnosis.confidence)
+      ? ` (${Math.round(view.diagnosis.confidence * 100)}%)`
+      : '';
+    // pretty label
+    return `${prettyCond(view.diagnosis.condition || 'review_recommended')}${pct}`;
+  }, [view]);
+
+  // Optional: list of condition scores if backend provides them
+  // Accepts either `conditions: [{condition, confidence}]` or `scores: [{label, score}]`
+  const scoredConditions = useMemo(() => {
+    const arrA = Array.isArray(view?.conditions) ? view.conditions : [];
+    const arrB = Array.isArray(view?.scores)
+      ? view.scores.map(s => ({ condition: s.label, confidence: s.score }))
+      : [];
+    const merged = [...arrA, ...arrB];
+    // de-dup by condition
+    const seen = new Set();
+    const out = [];
+    for (const item of merged) {
+      const key = (item?.condition || '').toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return out;
+  }, [view]);
+
+  const curlSnippet = useMemo(() => {
+    if (mode === 'partner') {
+      const sec = secret || 'YOUR_SECRET';
+      return `b64=$(base64 -i "/path/to/your.csv" | tr -d '\\n')
+
+curl -X POST ${endpoint} \\
+  -H "Content-Type: application/json" \\
+  -H "X-Shared-Secret: ${sec}"${
+    token ? ` \\\n  -H "Authorization: Bearer ${token}"` : ''
+  } \\
+  -d '{
+    "fileName": "your.csv",
+    "fileBase64": "'"$b64"'",
+    "contentType": "text/csv",
+    "meta": ${metaText || '{}'},
+    "analyze": ${String(analyze)}
+  }'`;
+    }
+    return `curl -X POST ${endpoint} \\
+  ${token ? `-H "Authorization: Bearer ${token}" \\\n  ` : ''}-F 'file=@"/path/to/your.csv"'`;
+  }, [mode, endpoint, secret, token, metaText, analyze]);
 
   return (
-    <div style={styles.wrap}>
-      <h2 style={styles.title}>Parkinson CSV Analysis</h2>
-      <p style={styles.sub}>
-        Upload a CSV with columns like: <code>Left Pupil Size (mm)</code>,{' '}
-        <code>Right Pupil Size (mm)</code>, optionally <code>Frame Number</code> and{' '}
-        <code>Brightness</code>.
-      </p>
-
-      {/* mode switch */}
-      <div style={styles.modeRow}>
-        <label style={styles.modeLabel}>
-          <input
-            type="radio"
-            name="mode"
-            value="test"
-            checked={mode === 'test'}
-            onChange={() => setMode('test')}
-          />
-          <span> UI Test (multipart → /api/ingest/test)</span>
-        </label>
-        <label style={styles.modeLabel}>
-          <input
-            type="radio"
-            name="mode"
-            value="partner"
-            checked={mode === 'partner'}
-            onChange={() => setMode('partner')}
-          />
-          <span> Partner JSON (base64 + secret → /api/ingest)</span>
-        </label>
+    <div style={S.page}>
+      {/* Header */}
+      <div style={S.header}>
+        <h2 style={S.hTitle}>CSV Analysis</h2>
+        <div style={S.hSub}>Upload a pupil-tracking CSV to analyze preliminary markers.</div>
       </div>
 
-      {/* partner options */}
-      {mode === 'partner' && (
-        <div style={styles.panel}>
-          <div style={styles.row}>
-            <label style={styles.lbl}>Shared secret</label>
-            <input
-              type="password"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              placeholder="X-Shared-Secret"
-              style={styles.input}
-            />
-          </div>
-          <div style={styles.row}>
-            <label style={styles.lbl}>
-              <input
-                type="checkbox"
-                checked={analyze}
-                onChange={(e) => setAnalyze(e.target.checked)}
-              />{' '}
-              Analyze on upload
-            </label>
-          </div>
-          <div style={styles.rowCol}>
-            <label style={styles.lbl}>Meta (JSON)</label>
-            <textarea
-              rows={5}
-              value={metaText}
-              onChange={(e) => setMetaText(e.target.value)}
-              style={styles.textarea}
-              spellCheck={false}
-            />
-          </div>
+      {/* Mode Switch */}
+      <div style={S.card}>
+        <div style={S.tabs}>
+          <button
+            type="button"
+            onClick={() => setMode('test')}
+            style={{ ...S.tab, ...(mode === 'test' ? S.tabActive : {}) }}
+          >
+            UI Test (multipart)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('partner')}
+            style={{ ...S.tab, ...(mode === 'partner' ? S.tabActive : {}) }}
+          >
+            Partner JSON (base64 + secret)
+          </button>
         </div>
-      )}
 
-      <form onSubmit={onSubmit} style={styles.form}>
-        <input
-          type="file"
-          accept=".csv,text/csv"
-          onChange={onPick}
-          style={styles.file}
-        />
-        <button type="submit" style={styles.btn} disabled={busy}>
-          {busy ? 'Analyzing…' : 'Upload & Analyze'}
-        </button>
-      </form>
+        {mode === 'partner' && (
+          <div style={S.panel}>
+            <div style={S.row}>
+              <label style={S.label}>Shared secret</label>
+              <input
+                type="password"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                placeholder="X-Shared-Secret"
+                style={S.input}
+              />
+            </div>
+            <div style={S.row}>
+              <label style={{ ...S.label, width: 'auto' }}>
+                <input
+                  type="checkbox"
+                  checked={analyze}
+                  onChange={(e) => setAnalyze(e.target.checked)}
+                />{' '}
+                Analyze on upload
+              </label>
+            </div>
+            <div style={S.rowCol}>
+              <label style={S.label}>Meta (JSON)</label>
+              <textarea
+                rows={5}
+                value={metaText}
+                onChange={(e) => setMetaText(e.target.value)}
+                style={S.textarea}
+                spellCheck={false}
+              />
+            </div>
+          </div>
+        )}
 
-      {error && <div style={styles.error}>{error}</div>}
+        {/* Dropzone */}
+        <div
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          style={S.drop}
+          onClick={() => fileInputRef.current?.click()}
+          role="button"
+          aria-label="Upload CSV"
+          title="Click to choose file or drag & drop"
+        >
+          <div style={S.dropIcon}>📄</div>
+          <div style={S.dropTitle}>Drop CSV here or click to choose</div>
+          <div style={S.dropHint}>Accepted: .csv (Left/Right pupil size, optional Frame & Brightness)</div>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            ref={fileInputRef}
+            onChange={onBrowse}
+          />
+        </div>
 
+        {/* Chosen file */}
+        {file && (
+          <div style={S.fileRow}>
+            <div style={S.fileName}>📎 {file.name}</div>
+            <button type="button" onClick={clearFile} style={S.linkBtn}>Remove</button>
+          </div>
+        )}
+
+        {/* Action */}
+        <div style={S.actions}>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={busy || !file}
+            style={{ ...S.primaryBtn, opacity: busy || !file ? 0.7 : 1 }}
+          >
+            {busy ? 'Analyzing…' : 'Upload & Analyze'}
+          </button>
+        </div>
+
+        {/* Error */}
+        {error && <div style={S.error}>{error}</div>}
+      </div>
+
+      {/* Result */}
       {result && (
-        <div style={styles.card}>
-          <h3 style={styles.h3}>Result</h3>
+        <div style={{ ...S.card, marginTop: 16 }}>
+          <h3 style={S.sectionTitle}>Result</h3>
 
           {result?.stored?.path && (
-            <div style={{ marginBottom: 10, fontSize: 13, color: '#6b7a89' }}>
+            <div style={S.smallNote}>
               Stored at: <code>{result.stored.path}</code>
             </div>
           )}
 
-          <div style={styles.grid}>
-            <div style={styles.kv}>
-              <div style={styles.k}>Rows</div>
-              <div style={styles.v}>{view?.n_rows ?? '—'}</div>
-            </div>
-            <div style={styles.kv}>
-              <div style={styles.k}>Diagnosis</div>
-              <div style={{ ...styles.badge, ...badgeColor(view?.diagnosis) }}>
-                {view?.diagnosis ?? '—'}
-              </div>
-            </div>
-            <div style={styles.kv}>
-              <div style={styles.k}>Left (mean ± std)</div>
-              <div style={styles.v}>
-                {view?.summary?.left?.mean ?? '—'} ± {view?.summary?.left?.std ?? '—'}
-              </div>
-            </div>
-            <div style={styles.kv}>
-              <div style={styles.k}>Right (mean ± std)</div>
-              <div style={styles.v}>
-                {view?.summary?.right?.mean ?? '—'} ± {view?.summary?.right?.std ?? '—'}
-              </div>
-            </div>
-            <div style={styles.kv}>
-              <div style={styles.k}>Asymmetry (mm)</div>
-              <div style={styles.v}>{view?.summary?.asym_mm ?? '—'}</div>
-            </div>
-            <div style={styles.kv}>
-              <div style={styles.k}>Brightness corr (L / R)</div>
-              <div style={styles.v}>
-                {view?.summary?.brightness_corr?.left ?? '—'} /{' '}
-                {view?.summary?.brightness_corr?.right ?? '—'}
-              </div>
-            </div>
+          <div style={S.grid}>
+            <KV k="Rows" v={view?.n_rows ?? '—'} />
+            <KV
+              k="Diagnosis"
+              v={
+                <span style={{ ...S.badge, ...badgeStyle(diagKey) }}>
+                  {diagLabel}
+                </span>
+              }
+            />
+            <KV k="Left (mean ± std)" v={`${nx(view?.summary?.left?.mean)} ± ${nx(view?.summary?.left?.std)}`} />
+            <KV k="Right (mean ± std)" v={`${nx(view?.summary?.right?.mean)} ± ${nx(view?.summary?.right?.std)}`} />
+            <KV k="Asymmetry (mm)" v={nx(view?.summary?.asym_mm)} />
+            <KV
+              k="Brightness corr (L / R)"
+              v={`${nx(view?.summary?.brightness_corr?.left)} / ${nx(view?.summary?.brightness_corr?.right)}`}
+            />
           </div>
+
+          {/* Optional: show per-condition confidences if provided */}
+          {scoredConditions.length > 0 && (
+            <>
+              <h4 style={S.subTitle}>Condition likelihoods</h4>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {scoredConditions.map((c, i) => (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 60px', gap: 8, alignItems: 'center' }}>
+                    <div style={{ fontSize: 14 }}>{prettyCond(c.condition)}</div>
+                    <div style={{ height: 10, background: '#eef5fa', borderRadius: 8, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.max(0, Math.min(100, Math.round((c.confidence || 0) * 100)))}%`,
+                        height: '100%',
+                        background: COLORS.brand
+                      }} />
+                    </div>
+                    <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      {Math.round((c.confidence || 0) * 100)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           {Array.isArray(view?.reasons) && view.reasons.length > 0 && (
             <>
-              <h4 style={styles.h4}>Reasons</h4>
-              <ul>
-                {view.reasons.map((r, i) => (
-                  <li key={i}>{r}</li>
-                ))}
+              <h4 style={S.subTitle}>Reasons</h4>
+              <ul style={S.reasonList}>
+                {view.reasons.map((r, i) => <li key={i}>{r}</li>)}
               </ul>
             </>
           )}
 
           <details style={{ marginTop: 12 }}>
             <summary>Show first 20 samples</summary>
-            <pre style={styles.pre}>
+            <pre style={S.pre}>
               {JSON.stringify(view?.samples?.slice(0, 20) ?? [], null, 2)}
             </pre>
           </details>
 
-          <button onClick={downloadJSON} style={{ ...styles.btn, marginTop: 12 }}>
-            Download JSON
-          </button>
+          <div style={{ marginTop: 12 }}>
+            <button onClick={downloadJSON} style={S.secondaryBtn}>⬇️ Download JSON</button>
+          </div>
         </div>
       )}
 
-      <details style={{ marginTop: 16 }}>
-        <summary>Debug: cURL</summary>
-        <pre style={styles.pre}>
-{mode === 'partner'
-  ? `b64=$(base64 -i "/path/to/your.csv" | tr -d '\\n')\n\ncurl -X POST ${API}/api/ingest \\\n  -H "Content-Type: application/json" \\\n  -H "X-Shared-Secret: ${secret || 'YOUR_SECRET'}" \\\n  -d '{\n    "fileName": "your.csv",\n    "fileBase64": "'"$b64"'",\n    "contentType": "text/csv",\n    "meta": ${metaText || '{}'},\n    "analyze": ${analyze}\n  }'`
-  : `curl -X POST ${API}/api/ingest/test \\\n  -F 'file=@"/path/to/your.csv"'`}
-        </pre>
-      </details>
+      {/* Debug cURL */}
+      <div style={{ ...S.card, marginTop: 16 }}>
+        <details>
+          <summary>Debug: cURL</summary>
+          <pre style={S.pre}>{curlSnippet}</pre>
+        </details>
+      </div>
     </div>
   );
 }
 
-function badgeColor(diagnosis) {
-  if (!diagnosis) return {};
-  if (diagnosis === 'clear')
-    return { background: '#E6FFFB', color: '#00796B', border: '1px solid #B2F5EA' };
-  if (diagnosis === 'flagged')
-    return { background: '#FFEDED', color: '#B71C1C', border: '1px solid #F5C2C2' };
-  return { background: '#FFF7E6', color: '#8B5E00', border: '1px solid #FFE58F' }; // review_recommended or other
+/* ---------- Small presentational helpers ---------- */
+function KV({ k, v }) {
+  return (
+    <div style={S.kv}>
+      <div style={S.k}>{k}</div>
+      <div style={S.v}>{v}</div>
+    </div>
+  );
 }
 
-const styles = {
-  wrap: { maxWidth: 900, margin: '0 auto', padding: '1rem', color: '#2E4057' },
-  title: { color: '#1B5A72', margin: 0, marginBottom: 6 },
-  sub: { marginTop: 4, color: '#6b7a89' },
-  modeRow: { display: 'flex', gap: 16, alignItems: 'center', marginTop: 12, marginBottom: 6 },
-  modeLabel: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 },
-  panel: { padding: 12, border: '1px solid #e8edf2', borderRadius: 8, background: '#FBFEFF', marginBottom: 8 },
-  row: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 },
+function nx(v) {
+  return (v === null || v === undefined || Number.isNaN(v)) ? '—' : v;
+}
+
+function prettyCond(k) {
+  const key = String(k || '').toLowerCase();
+  if (key === 'ptsd') return 'PTSD';
+  if (key === 'high_stress' || key === 'stress') return 'High Stress';
+  if (key === 'parkinson') return 'Parkinson’s';
+  if (key === 'alzheimers' || key === 'alzheimer') return 'Alzheimer’s';
+  if (key === 'clear' || key === 'ok') return 'Clear';
+  if (key === 'review_recommended') return 'Review Recommended';
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function badgeStyle(diagKey) {
+  if (!diagKey) return {};
+  const d = String(diagKey).toLowerCase();
+  if (d === 'clear' || d === 'ok')
+    return { background: '#E6FFFB', color: '#00796B', border: '1px solid #B2F5EA' };
+  if (d === 'flagged')
+    return { background: '#FFEDED', color: '#B71C1C', border: '1px solid #F5C2C2' };
+  // PTSD / High Stress / Parkinson / Alzheimer / review_recommended
+  return { background: '#FFF7E6', color: '#8B5E00', border: '1px solid #FFE58F' };
+}
+
+/* ---------- Styles (brand-aligned, clean) ---------- */
+const COLORS = {
+  brand: '#1B5A72',
+  text: '#2E4057',
+  cardBorder: '#e8edf2',
+  note: '#6b7a89',
+};
+
+const S = {
+  page: { maxWidth: 980, margin: '0 auto', padding: '16px', color: COLORS.text, fontFamily: 'Segoe UI, sans-serif' },
+
+  header: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 },
+  logo: { height: 36, objectFit: 'contain' },
+  hTitle: { margin: 0, color: COLORS.brand, fontSize: '1.6rem' },
+  hSub: { color: COLORS.note, marginTop: 2 },
+
+  card: {
+    background: '#fff',
+    border: `1px solid ${COLORS.cardBorder}`,
+    borderRadius: 12,
+    padding: 16,
+    boxShadow: '0 6px 18px rgba(0,0,0,0.04)',
+  },
+
+  tabs: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
+  tab: {
+    background: '#F7FBFF',
+    border: `1px solid ${COLORS.cardBorder}`,
+    padding: '8px 12px',
+    borderRadius: 8,
+    cursor: 'pointer',
+    color: COLORS.text,
+  },
+  tabActive: { background: '#D9F1FF', color: COLORS.brand, fontWeight: 600 },
+
+  panel: {
+    background: '#FBFEFF',
+    border: `1px solid ${COLORS.cardBorder}`,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  row: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 },
   rowCol: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 },
-  lbl: { width: 140, color: '#6b7a89', fontSize: 13 },
-  input: { padding: 8, border: '1px solid #d9e6ee', borderRadius: 8, flex: 1 },
-  textarea: { padding: 8, border: '1px solid #d9e6ee', borderRadius: 8, width: '100%', fontFamily: 'monospace' },
-  form: { display: 'flex', gap: 12, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' },
-  file: { padding: 8, border: '1px solid #d9e6ee', borderRadius: 8, background: '#fff' },
-  btn: { padding: '10px 16px', borderRadius: 8, border: 'none', background: '#1B5A72', color: '#fff', cursor: 'pointer', fontWeight: 600 },
+  label: { width: 140, color: COLORS.note, fontSize: 13 },
+  input: { padding: 10, border: '1px solid #d9e6ee', borderRadius: 8, flex: 1 },
+  textarea: { padding: 10, border: '1px solid #d9e6ee', borderRadius: 8, width: '100%', fontFamily: 'monospace' },
+
+  drop: {
+    marginTop: 8,
+    border: '2px dashed #b7d4e2',
+    borderRadius: 12,
+    padding: 24,
+    textAlign: 'center',
+    background: '#FAFDFF',
+    cursor: 'pointer'
+  },
+  dropIcon: { fontSize: 28, marginBottom: 6 },
+  dropTitle: { fontWeight: 600, color: COLORS.brand },
+  dropHint: { color: COLORS.note, fontSize: 13 },
+
+  fileRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
+  fileName: { fontSize: 14 },
+  linkBtn: { background: 'transparent', border: 'none', color: COLORS.brand, cursor: 'pointer', fontWeight: 600 },
+
+  actions: { marginTop: 12 },
+  primaryBtn: {
+    padding: '10px 16px',
+    borderRadius: 8,
+    border: 'none',
+    background: COLORS.brand,
+    color: '#fff',
+    cursor: 'pointer',
+    fontWeight: 600
+  },
+  secondaryBtn: {
+    padding: '10px 16px',
+    borderRadius: 8,
+    border: '1px solid #d9e6ee',
+    background: '#fff',
+    color: COLORS.brand,
+    cursor: 'pointer',
+    fontWeight: 600
+  },
+
   error: { marginTop: 12, background: '#fff2f0', color: '#a8071a', padding: '10px 12px', borderRadius: 8, border: '1px solid #ffccc7' },
-  card: { marginTop: 16, background: '#fff', border: '1px solid #e8edf2', borderRadius: 12, padding: 16, boxShadow: '0 6px 18px rgba(0,0,0,0.04)' },
-  h3: { margin: 0, marginBottom: 10, color: '#1B5A72' },
-  h4: { marginBottom: 6, marginTop: 16 },
-  grid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' },
-  kv: { background: '#F7FBFF', border: '1px solid #E6F0F8', borderRadius: 8, padding: 10 },
+
+  sectionTitle: { margin: 0, color: COLORS.brand, marginBottom: 8 },
+
+  smallNote: { fontSize: 13, color: COLORS.note, marginBottom: 8 },
+
+  grid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginTop: 8 },
+  kv: { background: '#F7FBFF', border: `1px solid ${COLORS.cardBorder}`, borderRadius: 8, padding: 10 },
   k: { fontSize: 12, color: '#6c7c8c' },
   v: { fontWeight: 600, marginTop: 2 },
+
   badge: { padding: '4px 8px', borderRadius: 20, display: 'inline-block', fontWeight: 700, textTransform: 'capitalize' },
-  pre: { background: '#0f172a', color: '#e2e8f0', padding: 12, borderRadius: 8, overflowX: 'auto' },
+
+  subTitle: { marginTop: 14, marginBottom: 6, color: COLORS.text },
+  reasonList: { marginTop: 0, paddingLeft: 18 },
+
+  pre: { background: '#0f172a', color: '#e2e8f0', padding: 12, borderRadius: 8, overflowX: 'auto', marginTop: 8 },
 };

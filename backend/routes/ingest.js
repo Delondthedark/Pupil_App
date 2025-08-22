@@ -3,65 +3,90 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import { analyzeCsvBuffer } from '../services/parkinsonAnalyzer.js';
+import { analyzeCsvBuffer } from '../services/ParkinsonAnalyzer.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-async function saveCsv(fileName, buf) {
-  const uploadsDir = path.join(process.cwd(), 'uploads', 'csv');
-  await fs.promises.mkdir(uploadsDir, { recursive: true });
-  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_') || `upload_${Date.now()}.csv`;
-  const fullPath = path.join(uploadsDir, safeName);
-  await fs.promises.writeFile(fullPath, buf);
-  return { safeName, fullPath };
-}
+const looksLikeCSV = (buf) => {
+  const head = buf.toString('utf8', 0, 2048);
+  return head.includes(',') || head.includes('\n');
+};
 
-// JSON ingest (partners / backend)
+// Partner JSON: POST /ingest  (expects base64)
 router.post('/', async (req, res) => {
   try {
     const provided = req.get('X-Shared-Secret') || '';
-    if (provided !== process.env.SHARED_UPLOAD_TOKEN) {
+    const expected = process.env.SHARED_UPLOAD_TOKEN || '';
+    if (!expected || provided !== expected) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { fileName = `upload_${Date.now()}.csv`, fileBase64 = '', analyze = false } = req.body || {};
+    const {
+      fileName = `upload_${Date.now()}.csv`,
+      fileBase64 = '',
+      contentType = 'text/csv',
+      meta = {},
+      analyze = true,
+    } = req.body || {};
+
     if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
+    if (contentType !== 'text/csv') return res.status(400).json({ error: 'contentType must be text/csv' });
 
-    const buf = Buffer.from(fileBase64, 'base64');
-    const { safeName } = await saveCsv(fileName, buf);
+    let csvBuf;
+    try { csvBuf = Buffer.from(fileBase64, 'base64'); }
+    catch { return res.status(400).json({ error: 'Invalid base64' }); }
 
-    let analysis = null;
-    if (analyze) analysis = analyzeCsvBuffer(buf);
+    if (!looksLikeCSV(csvBuf)) return res.status(400).json({ error: 'Payload does not look like CSV' });
 
-    res.json({
+    const dir = path.join(process.cwd(), 'uploads', 'csv');
+    await fs.promises.mkdir(dir, { recursive: true });
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_') || `upload_${Date.now()}.csv`;
+    const fullPath = path.join(dir, safeName);
+    await fs.promises.writeFile(fullPath, csvBuf);
+
+    if (!analyze) {
+      return res.json({
+        accepted: true,
+        stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType },
+        meta
+      });
+    }
+
+    const analysis = analyzeCsvBuffer(csvBuf);
+    return res.json({
       accepted: true,
-      stored: { path: `/uploads/csv/${safeName}`, bytes: buf.length, contentType: 'text/csv' },
+      stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType },
+      meta,
       analysis
     });
-  } catch (err) {
-    console.error('ingest error:', err);
-    res.status(500).json({ error: 'Server error' });
+  } catch (e) {
+    console.error('ingest/ error:', e);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Form-data ingest (frontend / Postman)
+// UI Test: multipart → POST /ingest/test
 router.post('/test', upload.single('file'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'CSV file required' });
+    if (!req.file?.buffer) return res.status(400).json({ error: 'file is required' });
+    const csvBuf = req.file.buffer;
 
-    const buf = req.file.buffer;
-    const { safeName } = await saveCsv(req.file.originalname, buf);
-    const analysis = analyzeCsvBuffer(buf);
+    const dir = path.join(process.cwd(), 'uploads', 'csv');
+    await fs.promises.mkdir(dir, { recursive: true });
+    const safeName = (req.file.originalname || `upload_${Date.now()}.csv`).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fullPath = path.join(dir, safeName);
+    await fs.promises.writeFile(fullPath, csvBuf);
 
-    res.json({
+    const analysis = analyzeCsvBuffer(csvBuf);
+    return res.json({
       accepted: true,
-      stored: { path: `/uploads/csv/${safeName}`, bytes: buf.length, contentType: req.file.mimetype },
+      stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType: 'text/csv' },
       analysis
     });
-  } catch (err) {
-    console.error('ingest/test error:', err);
-    res.status(500).json({ error: 'Server error' });
+  } catch (e) {
+    console.error('ingest/test error:', e);
+    return res.status(400).json({ error: e.message || 'Analyze failed' });
   }
 });
 
