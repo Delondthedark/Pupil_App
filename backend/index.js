@@ -32,7 +32,7 @@ app.use(['/queue', '/api/queue'], foodImageQueue);
 app.use(['/sleep', '/api/sleep'], sleepRouter);
 app.use(['/auth', '/api/auth'], authRouter);
 app.use('/parkinson', parkinsonAnalyze); 
-app.use('/api/ingest', ingestRouter);
+app.use('/ingest', ingestRouter);
 
 // Start
 app.listen(PORT, '0.0.0.0', () =>
