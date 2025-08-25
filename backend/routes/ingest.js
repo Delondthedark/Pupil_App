@@ -5,11 +5,16 @@ import path from 'path';
 import multer from 'multer';
 import { analyzeCsvBuffer } from '../services/ParkinsonAnalyzer.js';
 
+// Health check
+router.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'ingest' });
+});
+
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-const looksLikeCSV = (buf) => {
-  const head = buf.toString('utf8', 0, 2048);
+const looksLikeCSV = (buif) => {
+  const head = buf.toStrng('utf8', 0, 2048);
   return head.includes(',') || head.includes('\n');
 };
 
