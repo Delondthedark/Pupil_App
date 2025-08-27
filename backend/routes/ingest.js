@@ -5,20 +5,31 @@ import path from 'path';
 import multer from 'multer';
 import { analyzeCsvBuffer } from '../services/p_analyzer.js';
 
+const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 } // 20 MB
+});
+
 // Health check
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'ingest' });
 });
 
-const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
-
-const looksLikeCSV = (buif) => {
-  const head = buf.toStrng('utf8', 0, 2048);
-  return head.includes(',') || head.includes('\n');
+// Quick CSV sanity check
+const looksLikeCSV = (buf) => {
+  try {
+    const head = buf.toString('utf8', 0, 2048);
+    return head.includes(',') || head.includes('\n');
+  } catch {
+    return false;
+  }
 };
 
-// Partner JSON: POST /ingest  (expects base64)
+/**
+ * Partner JSON API → POST /ingest
+ * Body: { fileName, fileBase64, contentType, meta, analyze }
+ */
 router.post('/', async (req, res) => {
   try {
     const provided = req.get('X-Shared-Secret') || '';
@@ -39,8 +50,11 @@ router.post('/', async (req, res) => {
     if (contentType !== 'text/csv') return res.status(400).json({ error: 'contentType must be text/csv' });
 
     let csvBuf;
-    try { csvBuf = Buffer.from(fileBase64, 'base64'); }
-    catch { return res.status(400).json({ error: 'Invalid base64' }); }
+    try {
+      csvBuf = Buffer.from(fileBase64, 'base64');
+    } catch {
+      return res.status(400).json({ error: 'Invalid base64' });
+    }
 
     if (!looksLikeCSV(csvBuf)) return res.status(400).json({ error: 'Payload does not look like CSV' });
 
@@ -71,7 +85,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-// UI Test: multipart → POST /ingest/test
+/**
+ * UI Test route → POST /ingest/test
+ * multipart/form-data with field "file"
+ */
 router.post('/test', upload.single('file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return res.status(400).json({ error: 'file is required' });
