@@ -1,30 +1,32 @@
-import pkg from 'pg';
-import dotenv from 'dotenv';
+// ESM
+import 'dotenv/config';
+import pg from 'pg';
 
-dotenv.config();
-const { Pool } = pkg;
+const {
+  PGUSER,
+  PGPASSWORD,
+  PGHOST = 'localhost',
+  PGDATABASE,
+  PGPORT = '5432',
+} = process.env;
 
-if (!process.env.PGPASSWORD) {
-  console.error("❌ Missing PGPASSWORD in environment");
+if (!PGUSER || !PGPASSWORD || !PGDATABASE) {
+  console.error('[DB] Missing PG envs. Got:', {
+    PGUSER, PGPASSWORD: PGPASSWORD ? '***' : undefined, PGDATABASE, PGHOST, PGPORT
+  });
 }
 
-const pool = new Pool({
-  host: process.env.PGHOST || "localhost",
-  user: process.env.PGUSER || "postgres",
-  password: process.env.PGPASSWORD || "",
-  database: process.env.PGDATABASE || "postgres",
-  port: process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432,
-  ssl: false
+export const pool = new pg.Pool({
+  user: PGUSER,
+  password: String(PGPASSWORD),           // force string
+  host: PGHOST,
+  database: PGDATABASE,
+  port: Number(PGPORT),
+  ssl: false,                             // set true if using RDS with SSL
+  max: 10,
+  idleTimeoutMillis: 30000,
 });
 
-// Quick self-test
-pool.connect()
-  .then(client => {
-    console.log("✅ Connected to PostgreSQL:", process.env.PGDATABASE);
-    client.release();
-  })
-  .catch(err => {
-    console.error("❌ Database connection failed:", err.message);
-  });
-
-export default pool;
+pool.on('error', (err) => {
+  console.error('[DB] Pool error:', err);
+});
