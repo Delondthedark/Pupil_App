@@ -1,4 +1,4 @@
-// backend/services/ParkinsonAnalyzer.js
+// backend/services/p_analyzer.js
 // ESM module
 import { parse } from 'csv-parse/sync';
 

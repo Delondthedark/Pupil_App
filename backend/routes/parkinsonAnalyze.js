@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
-import { analyzeCsvBuffer } from '../services/ParkinsonAnalyzer.js';
+import { analyzeCsvBuffer } from '../services/p_analyzer.js';
 import fetch from 'node-fetch';
 
 const router = express.Router();

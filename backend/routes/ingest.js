@@ -3,7 +3,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import { analyzeCsvBuffer } from '../services/ParkinsonAnalyzer.js';
+import { analyzeCsvBuffer } from '../services/p_analyzer.js';
 
 // Health check
 router.get('/health', (req, res) => {
