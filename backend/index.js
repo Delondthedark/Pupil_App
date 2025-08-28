@@ -27,6 +27,7 @@ app.use((req, _, next) => { req.pool = pool; next(); });
 // Static
 app.use('/uploads', express.static('uploads'));
 
+// add under other diagnostics in backend/index.js
 app.get('/diag/env', (_req, res) => {
   res.json({
     PGUSER: process.env.PGUSER,
@@ -34,8 +35,18 @@ app.get('/diag/env', (_req, res) => {
     PGDATABASE: process.env.PGDATABASE,
     PGHOST: process.env.PGHOST,
     PGPORT: process.env.PGPORT,
+    JWT_SECRET: process.env.JWT_SECRET ? '(set)' : '(missing)',
     NODE_ENV: process.env.NODE_ENV,
   });
+});
+
+app.get('/diag/db', async (_req, res) => {
+  try {
+    const r = await pool.query('select now() as now');
+    res.json({ ok: true, now: r.rows[0].now });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // API routes (mount both plain and /api/*)

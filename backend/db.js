@@ -1,32 +1,20 @@
-// ESM
+// backend/db.js
 import 'dotenv/config';
-import pg from 'pg';
+import pkg from 'pg';
+const { Pool } = pkg;
 
-const {
-  PGUSER,
-  PGPASSWORD,
-  PGHOST = 'localhost',
-  PGDATABASE,
-  PGPORT = '5432',
-} = process.env;
-
-if (!PGUSER || !PGPASSWORD || !PGDATABASE) {
-  console.error('[DB] Missing PG envs. Got:', {
-    PGUSER, PGPASSWORD: PGPASSWORD ? '***' : undefined, PGDATABASE, PGHOST, PGPORT
-  });
-}
-
-export const pool = new pg.Pool({
-  user: PGUSER,
-  password: String(PGPASSWORD),           // force string
-  host: PGHOST,
-  database: PGDATABASE,
-  port: Number(PGPORT),
-  ssl: false,                             // set true if using RDS with SSL
-  max: 10,
-  idleTimeoutMillis: 30000,
+const pool = new Pool({
+  user: String(process.env.PGUSER || ''),
+  password: String(process.env.PGPASSWORD || ''),
+  host: process.env.PGHOST || 'localhost',
+  database: process.env.PGDATABASE || 'pupil_app_db',
+  port: Number(process.env.PGPORT || 5432),
+  // ssl: { rejectUnauthorized: false } // enable only if your PG requires SSL
 });
 
-pool.on('error', (err) => {
-  console.error('[DB] Pool error:', err);
-});
+// Boot-time check (great for EC2 visibility)
+pool.connect()
+  .then(c => { console.log('✅ PG connected'); c.release(); })
+  .catch(err => console.error('❌ PG connect failed:', err.message));
+
+export default pool;
