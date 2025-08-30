@@ -98,6 +98,5 @@ return {
   conditions: ml_prediction?.proba
     ? Object.entries(ml_prediction.proba).map(([condition, confidence]) => ({ condition, confidence }))
     : [],
-  samples: series.slice(0, 20),
 };
 }

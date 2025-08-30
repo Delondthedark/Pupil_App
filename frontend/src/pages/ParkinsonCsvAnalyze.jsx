@@ -359,14 +359,6 @@ curl -X POST ${endpoint} \\
               </ul>
             </>
           )}
-
-          <details style={{ marginTop: 12 }}>
-            <summary>Show first 20 samples</summary>
-            <pre style={S.pre}>
-              {JSON.stringify(view?.samples?.slice(0, 20) ?? [], null, 2)}
-            </pre>
-          </details>
-
           <div style={{ marginTop: 12 }}>
             <button onClick={downloadJSON} style={S.secondaryBtn}>⬇️ Download JSON</button>
           </div>
