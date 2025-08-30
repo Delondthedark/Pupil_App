@@ -6,30 +6,21 @@ import multer from 'multer';
 import { analyzeCsvBuffer } from '../services/p_analyzer.js';
 
 const router = express.Router();
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 } // 20 MB
-});
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-// Health check
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'ingest' });
-});
+// Health FIRST (avoid "Cannot access 'router' before initialization")
+router.get('/health', (_req, res) => res.json({ status: 'ok', service: 'ingest' }));
 
-// Quick CSV sanity check
 const looksLikeCSV = (buf) => {
   try {
-    const head = buf.toString('utf8', 0, 2048);
+    const head = buf.toString('utf8', 0, Math.min(buf.length, 2048));
     return head.includes(',') || head.includes('\n');
   } catch {
     return false;
   }
 };
 
-/**
- * Partner JSON API → POST /ingest
- * Body: { fileName, fileBase64, contentType, meta, analyze }
- */
+// Partner JSON: POST /ingest
 router.post('/', async (req, res) => {
   try {
     const provided = req.get('X-Shared-Secret') || '';
@@ -50,11 +41,8 @@ router.post('/', async (req, res) => {
     if (contentType !== 'text/csv') return res.status(400).json({ error: 'contentType must be text/csv' });
 
     let csvBuf;
-    try {
-      csvBuf = Buffer.from(fileBase64, 'base64');
-    } catch {
-      return res.status(400).json({ error: 'Invalid base64' });
-    }
+    try { csvBuf = Buffer.from(fileBase64, 'base64'); }
+    catch { return res.status(400).json({ error: 'Invalid base64' }); }
 
     if (!looksLikeCSV(csvBuf)) return res.status(400).json({ error: 'Payload does not look like CSV' });
 
@@ -72,7 +60,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const analysis = analyzeCsvBuffer(csvBuf);
+    const analysis = await analyzeCsvBuffer(csvBuf);
     return res.json({
       accepted: true,
       stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType },
@@ -85,10 +73,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-/**
- * UI Test route → POST /ingest/test
- * multipart/form-data with field "file"
- */
+// UI Test: multipart → POST /ingest/test
 router.post('/test', upload.single('file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return res.status(400).json({ error: 'file is required' });
@@ -100,7 +85,7 @@ router.post('/test', upload.single('file'), async (req, res) => {
     const fullPath = path.join(dir, safeName);
     await fs.promises.writeFile(fullPath, csvBuf);
 
-    const analysis = analyzeCsvBuffer(csvBuf);
+    const analysis = await analyzeCsvBuffer(csvBuf);
     return res.json({
       accepted: true,
       stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType: 'text/csv' },

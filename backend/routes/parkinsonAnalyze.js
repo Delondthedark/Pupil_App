@@ -1,35 +1,22 @@
 import express from 'express';
 import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
 import { analyzeCsvBuffer } from '../services/p_analyzer.js';
-import fetch from 'node-fetch';
+import { predict } from '../services/mlClient.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage() });
 
-// POST /parkinson/analyze  (multipart or JSON URL)
 router.post('/analyze', upload.single('file'), async (req, res) => {
   try {
-    let buf;
+    const buf = req.file?.buffer;
+    if (!buf) return res.status(400).json({ error: 'CSV file required' });
 
-    if (req.file) {
-      buf = req.file.buffer;                           // multipart: form-data "file"
-    } else if (req.body?.url) {
-      const r = await fetch(req.body.url);
-      if (!r.ok) throw new Error(`Fetch failed ${r.status}`);
-      buf = Buffer.from(await r.arrayBuffer());        // JSON: { "url": "https://..." }
-    } else if (req.body?.csvBase64) {
-      buf = Buffer.from(req.body.csvBase64, 'base64'); // JSON: { "csvBase64": "..." }
-    } else {
-      return res.status(400).json({ error: 'Provide a CSV file, url, or csvBase64' });
-    }
+    const analysis = await analyzeCsvBuffer(buf);
 
-    const result = analyzeCsvBuffer(buf);
-    return res.json(result);
+    return res.json(analysis);
   } catch (e) {
     console.error('Analyze error:', e);
-    return res.status(400).json({ error: e.message || 'Analyze failed' });
+    return res.status(500).json({ error: e.message || 'Analyze failed' });
   }
 });
 

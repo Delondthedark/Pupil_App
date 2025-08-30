@@ -1,7 +1,9 @@
+// backend/index.js
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import pool from './db.js';
+
 import foodRouter from './routes/food.js';
 import foodImageQueue from './routes/foodImageQueue.js';
 import sleepRouter from './routes/sleep.js';
@@ -18,16 +20,17 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   credentials: true,
 }));
+
 app.use(express.json({ limit: '80mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Attach DB pool
-app.use((req, _, next) => { req.pool = pool; next(); });
+app.use((req, _res, next) => { req.pool = pool; next(); });
 
-// Static
+// Static for uploaded CSVs
 app.use('/uploads', express.static('uploads'));
 
-// add under other diagnostics in backend/index.js
+// Diagnostics
 app.get('/diag/env', (_req, res) => {
   res.json({
     PGUSER: process.env.PGUSER,
@@ -35,29 +38,20 @@ app.get('/diag/env', (_req, res) => {
     PGDATABASE: process.env.PGDATABASE,
     PGHOST: process.env.PGHOST,
     PGPORT: process.env.PGPORT,
-    JWT_SECRET: process.env.JWT_SECRET ? '(set)' : '(missing)',
+    ML_BASE_URL: process.env.ML_BASE_URL,
     NODE_ENV: process.env.NODE_ENV,
   });
 });
 
-app.get('/diag/db', async (_req, res) => {
-  try {
-    const r = await pool.query('select now() as now');
-    res.json({ ok: true, now: r.rows[0].now });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+app.get(['/health', '/api/health'], (_req, res) => res.json({ ok: true }));
 
-// API routes (mount both plain and /api/*)
+// Routes (both plain and /api/*)
 app.use(['/food', '/api/food'], foodRouter);
 app.use(['/queue', '/api/queue'], foodImageQueue);
 app.use(['/sleep', '/api/sleep'], sleepRouter);
 app.use(['/auth', '/api/auth'], authRouter);
 app.use(['/parkinson', '/api/parkinson'], parkinsonAnalyze);
 app.use(['/ingest', '/api/ingest'], ingestRouter);
-
-app.get(['/health', '/api/health'], (_req, res) => res.json({ ok: true }));
 
 // Start
 app.listen(PORT, '0.0.0.0', () =>

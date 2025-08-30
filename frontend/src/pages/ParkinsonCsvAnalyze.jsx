@@ -145,22 +145,8 @@ export default function ParkinsonCsvAnalyze() {
   const view = useMemo(() => result?.analysis ?? result ?? null, [result]);
 
   // Derive a clean diagnosis label + style (handles string OR {condition, confidence})
-  const diagKey = useMemo(() => {
-    if (!view?.diagnosis) return '';
-    return typeof view.diagnosis === 'string'
-      ? view.diagnosis
-      : (view.diagnosis.condition || 'review_recommended');
-  }, [view]);
-
-  const diagLabel = useMemo(() => {
-    if (!view?.diagnosis) return '—';
-    if (typeof view.diagnosis === 'string') return view.diagnosis;
-    const pct = Number.isFinite(view.diagnosis.confidence)
-      ? ` (${Math.round(view.diagnosis.confidence * 100)}%)`
-      : '';
-    // pretty label
-    return `${prettyCond(view.diagnosis.condition || 'review_recommended')}${pct}`;
-  }, [view]);
+  const diagLabel = view?.diagnosis_final || '—';
+  const diagKey = String(diagLabel || '').toLowerCase();
 
   // Optional: list of condition scores if backend provides them
   // Accepts either `conditions: [{condition, confidence}]` or `scores: [{label, score}]`
@@ -365,7 +351,6 @@ curl -X POST ${endpoint} \\
               </div>
             </>
           )}
-
           {Array.isArray(view?.reasons) && view.reasons.length > 0 && (
             <>
               <h4 style={S.subTitle}>Reasons</h4>
@@ -385,7 +370,7 @@ curl -X POST ${endpoint} \\
           <div style={{ marginTop: 12 }}>
             <button onClick={downloadJSON} style={S.secondaryBtn}>⬇️ Download JSON</button>
           </div>
-        </div>
+        </div> 
       )}
 
       {/* Debug cURL */}
@@ -398,6 +383,7 @@ curl -X POST ${endpoint} \\
     </div>
   );
 }
+
 
 /* ---------- Small presentational helpers ---------- */
 function KV({ k, v }) {
