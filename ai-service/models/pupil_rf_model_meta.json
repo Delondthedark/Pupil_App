@@ -1,0 +1,14 @@
+{
+  "classes": [
+    "alzheimers",
+    "parkinson",
+    "ptsd",
+    "stress"
+  ],
+  "counts": {
+    "alzheimers": 600,
+    "parkinson": 600,
+    "ptsd": 600,
+    "stress": 600
+  }
+}

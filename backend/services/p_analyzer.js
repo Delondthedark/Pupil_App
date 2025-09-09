@@ -13,6 +13,20 @@ const mean = (a) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 const std = (a, m = mean(a)) =>
   Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / (a.length || 1));
 
+/** Pearson correlation */
+function corr(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n === 0) return NaN;
+  const ma = mean(a), mb = mean(b);
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    num += (a[i] - ma) * (b[i] - mb);
+    da += (a[i] - ma) ** 2;
+    db += (b[i] - mb) ** 2;
+  }
+  return num / Math.sqrt(da * db);
+}
+
 /** Map CSV headers */
 function mapColumns(row0) {
   const col = {};
@@ -48,6 +62,7 @@ export async function analyzeCsvBuffer(csvBuffer) {
 
   const leftArr = series.map(s => s.left);
   const rightArr = series.map(s => s.right);
+  const brightArr = series.map(s => s.bright).filter(v => Number.isFinite(v));
 
   // Simple summary stats
   const L_mean = mean(leftArr);
@@ -57,14 +72,25 @@ export async function analyzeCsvBuffer(csvBuffer) {
   const asym = Math.abs(L_mean - R_mean);
   const stv = std(leftArr.concat(rightArr));
 
+  // Brightness correlation if brightness exists
+  let corr_L_B = NaN, corr_R_B = NaN;
+  if (brightArr.length) {
+    corr_L_B = corr(leftArr.slice(0, brightArr.length), brightArr);
+    corr_R_B = corr(rightArr.slice(0, brightArr.length), brightArr);
+  }
+
   const summary = {
     left: { mean: L_mean.toFixed(3), std: L_std.toFixed(3) },
     right: { mean: R_mean.toFixed(3), std: R_std.toFixed(3) },
     asym_mm: asym.toFixed(3),
     short_term_variability: stv.toFixed(3),
+    brightness_corr: {
+      left: Number.isFinite(corr_L_B) ? corr_L_B.toFixed(3) : null,
+      right: Number.isFinite(corr_R_B) ? corr_R_B.toFixed(3) : null,
+    }
   };
 
-  // ---- ML Prediction (NEW) ----
+  // ---- ML Prediction ----
   let ml_prediction = null;
   try {
     const mlBase = process.env.ML_BASE_URL || 'http://localhost:8000';
@@ -76,8 +102,8 @@ export async function analyzeCsvBuffer(csvBuffer) {
         L_mean, R_mean,
         L_std, R_std,
         asym,
-        corr_L_B: 0.0,   // placeholder if brightness not available
-        corr_R_B: 0.0,
+        corr_L_B: Number.isFinite(corr_L_B) ? corr_L_B : 0.0,
+        corr_R_B: Number.isFinite(corr_R_B) ? corr_R_B : 0.0,
         stv,
       }),
     });
@@ -90,13 +116,13 @@ export async function analyzeCsvBuffer(csvBuffer) {
     console.error('Error calling ML service:', e.message);
   }
 
-return {
-  n_rows: series.length,
-  summary,
-  diagnosis_final: ml_prediction?.label || 'Review Recommended',
-  ml_prediction,
-  conditions: ml_prediction?.proba
-    ? Object.entries(ml_prediction.proba).map(([condition, confidence]) => ({ condition, confidence }))
-    : [],
-};
+  return {
+    n_rows: series.length,
+    summary,
+    diagnosis_final: ml_prediction?.label || 'Review Recommended',
+    ml_prediction,
+    conditions: ml_prediction?.proba
+      ? Object.entries(ml_prediction.proba).map(([condition, confidence]) => ({ condition, confidence }))
+      : [],
+  };
 }
