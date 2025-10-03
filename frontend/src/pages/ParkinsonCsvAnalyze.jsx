@@ -11,12 +11,13 @@ export default function ParkinsonCsvAnalyze() {
   const [mode, setMode] = useState('test');             // 'test' | 'partner'
   const [secret, setSecret] = useState(DEFAULT_SECRET);
   const [analyze, setAnalyze] = useState(true);
-  const [metaText, setMetaText] = useState('{\n  "patientId": "P001",\n  "testId": "abc123"\n}');
+  const [metaText, setMetaText] = useState('{\n  "testId": "abc123"\n}');
 
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [respHeaderMs, setRespHeaderMs] = useState(null); // capture X-Response-Time-Ms
 
   const fileInputRef = useRef(null);
   const endpoint = mode === 'partner' ? `${API}/api/ingest` : `${API}/api/ingest/test`;
@@ -67,6 +68,7 @@ export default function ParkinsonCsvAnalyze() {
     e.preventDefault();
     setError('');
     setResult(null);
+    setRespHeaderMs(null);
     if (!file) {
       setError('Choose a CSV file first.');
       return;
@@ -110,6 +112,10 @@ export default function ParkinsonCsvAnalyze() {
         });
       }
 
+      // capture final response time header if present
+      const headerMs = res.headers.get('x-response-time-ms');
+      if (headerMs != null) setRespHeaderMs(headerMs);
+
       const text = await res.text();
       let data;
       try { data = JSON.parse(text); }
@@ -144,6 +150,27 @@ export default function ParkinsonCsvAnalyze() {
   // Normalize for display
   const view = useMemo(() => result?.analysis ?? result ?? null, [result]);
 
+  // ---------------- schema-tolerant summary normalizer (old & new analyzer keys) ----------------
+  function fmt(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '—';
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(3).replace(/\.?0+$/, '') : String(v);
+  }
+  function normalizeSummary(s = {}) {
+    const left  = s.left  ?? {};
+    const right = s.right ?? {};
+    return {
+      left:  { mean: Number(left.mean),  std: Number(left.std) },
+      right: { mean: Number(right.mean), std: Number(right.std) },
+      asymmetry_mm: s.asymmetry_mm ?? s.asym_mm ?? null,
+      stv_bilateral: s.stv_bilateral ?? s.short_term_variability ?? s.stv ?? null,
+      corr_brightness: s.corr_brightness ?? s.brightness_corr ?? null,
+      corr_depth: s.corr_depth ?? s.depth_corr ?? null,
+    };
+  }
+  const norm = useMemo(() => normalizeSummary(view?.summary || {}), [view]);
+  // ---------------------------------------------------------------------------------------------
+
   // Derive a clean diagnosis label + style (handles string OR {condition, confidence})
   const diagLabel = view?.diagnosis_final || '—';
   const diagKey = String(diagLabel || '').toLowerCase();
@@ -156,7 +183,6 @@ export default function ParkinsonCsvAnalyze() {
       ? view.scores.map(s => ({ condition: s.label, confidence: s.score }))
       : [];
     const merged = [...arrA, ...arrB];
-    // de-dup by condition
     const seen = new Set();
     const out = [];
     for (const item of merged) {
@@ -167,6 +193,13 @@ export default function ParkinsonCsvAnalyze() {
     }
     return out;
   }, [view]);
+
+  // final response time: prefer body field, else header
+  const finalResponseMs = useMemo(() => {
+    if (result?.response_time_ms != null) return Number(result.response_time_ms);
+    if (respHeaderMs != null) return Number(respHeaderMs);
+    return null;
+  }, [result, respHeaderMs]);
 
   const curlSnippet = useMemo(() => {
     if (mode === 'partner') {
@@ -264,7 +297,9 @@ curl -X POST ${endpoint} \\
         >
           <div style={S.dropIcon}>📄</div>
           <div style={S.dropTitle}>Drop CSV here or click to choose</div>
-          <div style={S.dropHint}>Accepted: .csv (Left/Right pupil size, optional Frame & Brightness)</div>
+          <div style={S.dropHint}>
+            Accepted: .csv (Left/Right pupil size, <strong>Illuminance</strong> &amp; <strong>depth</strong> required)
+          </div>
           <input
             type="file"
             accept=".csv,text/csv"
@@ -309,6 +344,13 @@ curl -X POST ${endpoint} \\
             </div>
           )}
 
+          {/* final response time */}
+          {finalResponseMs != null && (
+            <div style={S.smallNote}>
+              Response time: <strong>{finalResponseMs.toFixed(1)} ms</strong>
+            </div>
+          )}
+
           <div style={S.grid}>
             <KV k="Rows" v={view?.n_rows ?? '—'} />
             <KV
@@ -319,12 +361,25 @@ curl -X POST ${endpoint} \\
                 </span>
               }
             />
-            <KV k="Left (mean ± std)" v={`${nx(view?.summary?.left?.mean)} ± ${nx(view?.summary?.left?.std)}`} />
-            <KV k="Right (mean ± std)" v={`${nx(view?.summary?.right?.mean)} ± ${nx(view?.summary?.right?.std)}`} />
-            <KV k="Asymmetry (mm)" v={nx(view?.summary?.asym_mm)} />
+            <KV k="Left (mean ± std)"  v={`${fmt(norm.left?.mean)} ± ${fmt(norm.left?.std)}`} />
+            <KV k="Right (mean ± std)" v={`${fmt(norm.right?.mean)} ± ${fmt(norm.right?.std)}`} />
+            <KV k="Asymmetry (mm)"     v={fmt(norm.asymmetry_mm)} />
+            <KV k="STV (bilateral)"    v={fmt(norm.stv_bilateral)} />
             <KV
               k="Brightness corr (L / R)"
-              v={`${nx(view?.summary?.brightness_corr?.left)} / ${nx(view?.summary?.brightness_corr?.right)}`}
+              v={
+                norm.corr_brightness
+                  ? `${fmt(norm.corr_brightness.left)} / ${fmt(norm.corr_brightness.right)}`
+                  : '— / —'
+              }
+            />
+            <KV
+              k="Depth corr (L / R)"
+              v={
+                norm.corr_depth
+                  ? `${fmt(norm.corr_depth.left)} / ${fmt(norm.corr_depth.right)}`
+                  : '— / —'
+              }
             />
           </div>
 
@@ -362,6 +417,14 @@ curl -X POST ${endpoint} \\
           <div style={{ marginTop: 12 }}>
             <button onClick={downloadJSON} style={S.secondaryBtn}>⬇️ Download JSON</button>
           </div>
+
+          {/* Debug timings (hidden by default if not present) */}
+          {view?.timings && (
+            <details style={{ marginTop: 12 }}>
+              <summary>Debug: timings</summary>
+              <pre style={S.pre}>{JSON.stringify(view.timings, null, 2)}</pre>
+            </details>
+          )}
         </div> 
       )}
 
@@ -369,7 +432,7 @@ curl -X POST ${endpoint} \\
       <div style={{ ...S.card, marginTop: 16 }}>
         <details>
           <summary>Debug: cURL</summary>
-          <pre style={S.pre}>{curlSnippet}</pre>
+        <pre style={S.pre}>{curlSnippet}</pre>
         </details>
       </div>
     </div>
@@ -387,16 +450,14 @@ function KV({ k, v }) {
   );
 }
 
-function nx(v) {
-  return (v === null || v === undefined || Number.isNaN(v)) ? '—' : v;
-}
-
 function prettyCond(k) {
   const key = String(k || '').toLowerCase();
   if (key === 'ptsd') return 'PTSD';
   if (key === 'high_stress' || key === 'stress') return 'High Stress';
   if (key === 'parkinson') return 'Parkinson’s';
   if (key === 'alzheimers' || key === 'alzheimer') return 'Alzheimer’s';
+  if (key === 'depression') return 'Depression';
+  if (key === 'adhd') return 'ADHD';
   if (key === 'clear' || key === 'ok') return 'Clear';
   if (key === 'review_recommended') return 'Review Recommended';
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -409,7 +470,7 @@ function badgeStyle(diagKey) {
     return { background: '#E6FFFB', color: '#00796B', border: '1px solid #B2F5EA' };
   if (d === 'flagged')
     return { background: '#FFEDED', color: '#B71C1C', border: '1px solid #F5C2C2' };
-  // PTSD / High Stress / Parkinson / Alzheimer / review_recommended
+  // PTSD / High Stress / Parkinson / Alzheimer / review_recommended / others
   return { background: '#FFF7E6', color: '#8B5E00', border: '1px solid #FFE58F' };
 }
 

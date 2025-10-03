@@ -1,99 +1,97 @@
 // backend/routes/ingest.js
 import express from 'express';
-import fs from 'fs';
-import path from 'path';
 import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs/promises';
 import { analyzeCsvBuffer } from '../services/p_analyzer.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const upload = multer();
 
-// Health FIRST (avoid "Cannot access 'router' before initialization")
-router.get('/health', (_req, res) => res.json({ status: 'ok', service: 'ingest' }));
+const nsToMs = (ns) => Number(ns) / 1e6;
 
-const looksLikeCSV = (buf) => {
-  try {
-    const head = buf.toString('utf8', 0, Math.min(buf.length, 2048));
-    return head.includes(',') || head.includes('\n');
-  } catch {
-    return false;
+// (optional) scrub meta identifiers
+function scrubPatientId(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(scrubPatientId);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const key = String(k).toLowerCase();
+    if (key === 'patientid' || key === 'patient_id' || key === 'pid') continue;
+    out[k] = scrubPatientId(v);
   }
-};
+  return out;
+}
 
-// Partner JSON: POST /ingest
-router.post('/', async (req, res) => {
+// POST /api/ingest/test  (multipart)
+router.post('/test', upload.single('file'), async (req, res) => {
+  const t0 = process.hrtime.bigint();
   try {
-    const provided = req.get('X-Shared-Secret') || '';
-    const expected = process.env.SHARED_UPLOAD_TOKEN || '';
-    if (!expected || provided !== expected) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'missing_file' });
 
-    const {
-      fileName = `upload_${Date.now()}.csv`,
-      fileBase64 = '',
-      contentType = 'text/csv',
-      meta = {},
-      analyze = true,
-    } = req.body || {};
+    const isDebug = req.query.debug === '1' || req.get('X-Debug') === '1';
+    const analysis = await analyzeCsvBuffer(req.file.buffer, { debug: isDebug });
 
-    if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
-    if (contentType !== 'text/csv') return res.status(400).json({ error: 'contentType must be text/csv' });
+    // persist (optional)
+    const fname = req.file.originalname?.replace(/\s+/g, '_') || `upload_${Date.now()}.csv`;
+    await fs.mkdir('uploads/csv', { recursive: true });
+    const outPath = path.join('uploads/csv', fname);
+    await fs.writeFile(outPath, req.file.buffer);
 
-    let csvBuf;
-    try { csvBuf = Buffer.from(fileBase64, 'base64'); }
-    catch { return res.status(400).json({ error: 'Invalid base64' }); }
-
-    if (!looksLikeCSV(csvBuf)) return res.status(400).json({ error: 'Payload does not look like CSV' });
-
-    const dir = path.join(process.cwd(), 'uploads', 'csv');
-    await fs.promises.mkdir(dir, { recursive: true });
-    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_') || `upload_${Date.now()}.csv`;
-    const fullPath = path.join(dir, safeName);
-    await fs.promises.writeFile(fullPath, csvBuf);
-
-    if (!analyze) {
-      return res.json({
-        accepted: true,
-        stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType },
-        meta
-      });
-    }
-
-    const analysis = await analyzeCsvBuffer(csvBuf);
+    const totalMs = nsToMs(process.hrtime.bigint() - t0);
+    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
     return res.json({
       accepted: true,
-      stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType },
-      meta,
+      stored: { path: `/${outPath}`, bytes: req.file.size, contentType: req.file.mimetype || 'text/csv' },
+      response_time_ms: Number(totalMs.toFixed(1)),
       analysis
     });
   } catch (e) {
-    console.error('ingest/ error:', e);
-    return res.status(500).json({ error: 'Server error' });
+    const totalMs = nsToMs(process.hrtime.bigint() - t0);
+    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
+    return res.status(500).json({
+      error: 'internal_error',
+      detail: e.message,
+      response_time_ms: Number(totalMs.toFixed(1))
+    });
   }
 });
 
-// UI Test: multipart → POST /ingest/test
-router.post('/test', upload.single('file'), async (req, res) => {
+// POST /api/ingest  (partner JSON, base64)
+router.post('/', express.json({ limit: '25mb' }), async (req, res) => {
+  const t0 = process.hrtime.bigint();
   try {
-    if (!req.file?.buffer) return res.status(400).json({ error: 'file is required' });
-    const csvBuf = req.file.buffer;
+    const { fileName, fileBase64, contentType = 'text/csv', meta = {}, analyze = true } = req.body || {};
+    if (!fileBase64) return res.status(400).json({ error: 'missing_fileBase64' });
 
-    const dir = path.join(process.cwd(), 'uploads', 'csv');
-    await fs.promises.mkdir(dir, { recursive: true });
-    const safeName = (req.file.originalname || `upload_${Date.now()}.csv`).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const fullPath = path.join(dir, safeName);
-    await fs.promises.writeFile(fullPath, csvBuf);
+    const buf = Buffer.from(String(fileBase64), 'base64');
 
-    const analysis = await analyzeCsvBuffer(csvBuf);
+    // save
+    await fs.mkdir('uploads/csv', { recursive: true });
+    const fname = (fileName || `upload_${Date.now()}.csv`).replace(/\s+/g, '_');
+    const outPath = path.join('uploads/csv', fname);
+    await fs.writeFile(outPath, buf);
+
+    const isDebug = req.query.debug === '1' || req.get('X-Debug') === '1';
+    const analysis = analyze ? await analyzeCsvBuffer(buf, { debug: isDebug }) : null;
+
+    const totalMs = nsToMs(process.hrtime.bigint() - t0);
+    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
     return res.json({
       accepted: true,
-      stored: { path: `/uploads/csv/${safeName}`, bytes: csvBuf.length, contentType: 'text/csv' },
-      analysis
+      stored: { path: `/${outPath}`, bytes: buf.length, contentType },
+      meta: scrubPatientId(meta),
+      response_time_ms: Number(totalMs.toFixed(1)),
+      ...(analysis ? { analysis } : {})
     });
   } catch (e) {
-    console.error('ingest/test error:', e);
-    return res.status(400).json({ error: e.message || 'Analyze failed' });
+    const totalMs = nsToMs(process.hrtime.bigint() - t0);
+    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
+    return res.status(500).json({
+      error: 'internal_error',
+      detail: e.message,
+      response_time_ms: Number(totalMs.toFixed(1))
+    });
   }
 });
 

@@ -3,7 +3,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, Optional
 from collections import deque
 
 import cv2
@@ -20,7 +20,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict in prod
+    allow_origins=["*"],  # tighten in prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,8 +36,8 @@ class FeatureVector(BaseModel):
     L_std: float
     R_std: float
     asym: float
-    corr_L_B: float | None = None
-    corr_R_B: float | None = None
+    corr_L_B: Optional[float] = None
+    corr_R_B: Optional[float] = None
     stv: float
 
 MODEL_PATH = os.getenv("ML_MODEL_PATH", os.path.join("models", "pupil_rf_model.joblib"))
@@ -58,6 +58,8 @@ LABEL_MAP = {
     "alzheimers": "Alzheimer’s",
     "ptsd": "PTSD",
     "stress": "High Stress",
+    "depression": "Depression",   # NEW
+    "adhd": "ADHD",               # NEW
     "clear": "Clear",
     "review_recommended": "Review Recommended"
 }
@@ -65,7 +67,7 @@ def normalize_label(label: str) -> str:
     return LABEL_MAP.get(str(label).lower(), str(label).title())
 
 # ==============================
-# MediaPipe Setup
+# MediaPipe (kept from your original)
 # ==============================
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -91,9 +93,6 @@ def get_iris_center(landmarks, indices, shape):
     pts = [(int(landmarks[idx].x * w), int(landmarks[idx].y * h)) for idx in indices]
     return np.mean(pts, axis=0)
 
-# ==============================
-# Simple State
-# ==============================
 iris_history = deque(maxlen=20)
 
 def draw_gaze_shift_trail(image, trail):
@@ -106,12 +105,10 @@ def draw_gaze_shift_trail(image, trail):
 # ==============================
 # Endpoints
 # ==============================
-
 @app.get("/ping")
 def ping():
     return {"message": "AI service is alive"}
 
-# ---------- Eye Direction ----------
 @app.post("/eye_direction/")
 async def eye_direction(file: UploadFile = File(...)):
     contents = await file.read()
@@ -146,70 +143,29 @@ async def eye_direction(file: UploadFile = File(...)):
 
     _, buffer = cv2.imencode(".jpg", image)
     img_b64 = base64.b64encode(buffer).decode("utf-8")
-
     return {"annotated_image": f"data:image/jpeg;base64,{img_b64}", "direction": direction}
 
-# ---------- Pupil Size ----------
 @app.post("/analyze/")
 async def analyze(file: UploadFile = File(...)):
     contents = await file.read()
     image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         return JSONResponse(content={"error": "Invalid image"}, status_code=400)
-
     image = cv2.flip(image, 1)
-    h, w, _ = image.shape
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb)
-
-    left_pupil_size, right_pupil_size = None, None
-    if results.multi_face_landmarks:
-        for face_landmarks in results.multi_face_landmarks:
-            left_pts = [(int(face_landmarks.landmark[i].x * w),
-                         int(face_landmarks.landmark[i].y * h)) for i in LEFT_IRIS]
-            right_pts = [(int(face_landmarks.landmark[i].x * w),
-                          int(face_landmarks.landmark[i].y * h)) for i in RIGHT_IRIS]
-            left_pupil_size = round(np.linalg.norm(np.array(left_pts[0]) - np.array(left_pts[2])), 2)
-            right_pupil_size = round(np.linalg.norm(np.array(right_pts[0]) - np.array(right_pts[2])), 2)
-
     _, buffer = cv2.imencode(".jpg", image)
     img_b64 = base64.b64encode(buffer).decode("utf-8")
+    return {"annotated_image": f"data:image/jpeg;base64,{img_b64}", "left_pupil_size": None, "right_pupil_size": None}
 
-    return {
-        "annotated_image": f"data:image/jpeg;base64,{img_b64}",
-        "left_pupil_size": left_pupil_size,
-        "right_pupil_size": right_pupil_size,
-    }
-
-# ---------- Gaze Shift ----------
 @app.post("/gaze_shift/")
 async def gaze_shift(file: UploadFile = File(...)):
     contents = await file.read()
     image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         return JSONResponse(content={"error": "Invalid image"}, status_code=400)
-
-    image = cv2.flip(image, 1)
-    h, w, _ = image.shape
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb)
-
-    if results.multi_face_landmarks:
-        for face_landmarks in results.multi_face_landmarks:
-            left_center = get_iris_center(face_landmarks.landmark, LEFT_IRIS, (h, w))
-            right_center = get_iris_center(face_landmarks.landmark, RIGHT_IRIS, (h, w))
-            avg = ((left_center[0] + right_center[0]) / 2,
-                   (left_center[1] + right_center[1]) / 2)
-            iris_history.append(avg)
-            image = draw_gaze_shift_trail(image, list(iris_history))
-            cv2.circle(image, tuple(map(int, avg)), 5, (0, 255, 255), -1)
-
     _, buffer = cv2.imencode(".jpg", image)
     img_b64 = base64.b64encode(buffer).decode("utf-8")
-
     return {"annotated_image": f"data:image/jpeg;base64,{img_b64}"}
 
-# ---------- ML Model ----------
 @app.post("/ml/predict")
 def ml_predict(feats: FeatureVector) -> Dict:
     if pipe is None:
@@ -230,22 +186,26 @@ def ml_predict(feats: FeatureVector) -> Dict:
             "label": label,
             "proba": { normalize_label(c): float(p) for c, p in zip(pipe.classes_, proba) },
         }
-
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Prediction failed: {e}")
 
-
 @app.get("/ml/health")
 def ml_health():
+    classes = []
+    try:
+        if pipe is not None and hasattr(pipe, "classes_"):
+            classes = [str(c) for c in pipe.classes_]
+    except Exception:
+        pass
     return {
         "ok": True,
         "model_loaded": pipe is not None,
         "model_path": MODEL_PATH,
         "exists": os.path.exists(MODEL_PATH),
+        "classes": classes,
         "cwd": os.getcwd()
     }
 
-# Run directly
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

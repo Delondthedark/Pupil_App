@@ -1,12 +1,16 @@
 {
   "classes": [
+    "adhd",
     "alzheimers",
+    "depression",
     "parkinson",
     "ptsd",
     "stress"
   ],
   "counts": {
+    "adhd": 600,
     "alzheimers": 600,
+    "depression": 600,
     "parkinson": 600,
     "ptsd": 600,
     "stress": 600
