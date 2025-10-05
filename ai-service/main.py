@@ -3,7 +3,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from collections import deque
 
 import cv2
@@ -58,16 +58,60 @@ LABEL_MAP = {
     "alzheimers": "Alzheimer’s",
     "ptsd": "PTSD",
     "stress": "High Stress",
-    "depression": "Depression",   # NEW
-    "adhd": "ADHD",               # NEW
+    "depression": "Depression",
+    "adhd": "ADHD",
     "clear": "Clear",
-    "review_recommended": "Review Recommended"
+    "review_recommended": "Review Recommended",
 }
 def normalize_label(label: str) -> str:
     return LABEL_MAP.get(str(label).lower(), str(label).title())
 
+def _norm_key(s: str) -> str:
+    # stable key for maps
+    return (s or "").strip().lower().replace("’", "'")
+
+# --- Reasons helpers (pure add-on, safe) ---
+def derive_reasons(feats: FeatureVector, top_key: str, top_conf: float) -> List[str]:
+    """
+    Produce short, human-readable reasons from your features.
+    Thresholds are conservative & can be tuned later.
+    """
+    reasons: List[str] = []
+
+    # Asymmetry (mm)
+    if isinstance(feats.asym, (int, float)):
+        if abs(feats.asym) >= 0.30:
+            reasons.append(f"Large L/R asymmetry ({feats.asym:.3f} mm)")
+        elif abs(feats.asym) >= 0.10:
+            reasons.append(f"Small L/R asymmetry ({feats.asym:.3f} mm)")
+
+    # Short-term variability (stv)
+    if isinstance(feats.stv, (int, float)):
+        if feats.stv >= 0.40:
+            reasons.append(f"High short-term variability (STV={feats.stv:.3f})")
+        elif feats.stv >= 0.20:
+            reasons.append(f"Moderate short-term variability (STV={feats.stv:.3f})")
+
+    # Brightness coupling correlations
+    for side, val in (("L", feats.corr_L_B), ("R", feats.corr_R_B)):
+        if isinstance(val, (int, float)):
+            if abs(val) >= 0.60:
+                reasons.append(f"Strong brightness coupling {side} (|r|={abs(val):.3f})")
+            elif abs(val) >= 0.40:
+                reasons.append(f"Moderate brightness coupling {side} (|r|={abs(val):.3f})")
+
+    # Confidence tag (optional)
+    if isinstance(top_conf, (int, float)):
+        if top_conf >= 0.90:
+            reasons.append("Very high model confidence")
+        elif top_conf >= 0.75:
+            reasons.append("High model confidence")
+
+    # Fallback if none triggered
+    return reasons or ["Top match among tested classes"]
+
 # ==============================
-# MediaPipe (kept from your original)
+# MediaPipe (kept as-is)
 # ==============================
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -182,9 +226,33 @@ def ml_predict(feats: FeatureVector) -> Dict:
         proba = pipe.predict_proba(X)[0]
         raw_label = pipe.classes_[np.argmax(proba)]
         label = normalize_label(raw_label)
+
+        # Map of normalized class → probability
+        proba_map = { normalize_label(c): float(p) for c, p in zip(pipe.classes_, proba) }
+
+        # Compute reasons for the top condition (ALWAYS provided)
+        top_condition = label
+        top_conf = float(proba_map.get(top_condition, 0.0))
+        reasons = derive_reasons(feats, top_condition, top_conf)
+
+        # Optional: provide per-class scores array with inline reasons for the top one
+        scores = []
+        for c_raw, p in zip(pipe.classes_, proba):
+            c_norm = normalize_label(c_raw)
+            if c_norm == top_condition:
+                scores.append({"label": c_norm, "score": float(p), "reasons": reasons})
+            else:
+                scores.append({"label": c_norm, "score": float(p)})
+
         return {
             "label": label,
-            "proba": { normalize_label(c): float(p) for c, p in zip(pipe.classes_, proba) },
+            "proba": proba_map,
+            "top_condition": top_condition,       # NEW
+            "reasons": reasons,                   # NEW (for top condition)
+            "explanations": {                     # NEW (map for easy lookup)
+                _norm_key(top_condition): reasons
+            },
+            "scores": scores                      # NEW (array; top includes reasons)
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Prediction failed: {e}")
@@ -208,4 +276,5 @@ def ml_health():
 
 if __name__ == "__main__":
     import uvicorn
+    # Keep 0.0.0.0:8000 so Nginx can proxy (you already wired /ai/ -> 127.0.0.1:8000)
     uvicorn.run(app, host="0.0.0.0", port=8000)
