@@ -1,5 +1,5 @@
 // src/pages/ParkinsonCsvAnalyze.jsx
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../auth/AuthContext';
 
 export default function ParkinsonCsvAnalyze() {
@@ -151,68 +151,53 @@ export default function ParkinsonCsvAnalyze() {
   const view = useMemo(() => result?.analysis ?? result ?? null, [result]);
 
   // ---------------- schema-tolerant summary normalizer (old & new analyzer keys) ----------------
-  function fmt(v) {
+  const fmt = useCallback((v) => {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
     const n = Number(v);
     return Number.isFinite(n) ? n.toFixed(3).replace(/\.?0+$/, '') : String(v);
-  }
-  function normalizeSummary(s = {}) {
+  }, []);
+
+  const normalizeSummary = useCallback((s = {}) => {
     const left  = s.left  ?? {};
     const right = s.right ?? {};
     return {
-      left:  { mean: num(left.mean),  std: num(left.std) },
-      right: { mean: num(right.mean), std: num(right.std) },
+      left:  { mean: Number(left.mean),  std: Number(left.std) },
+      right: { mean: Number(right.mean), std: Number(right.std) },
       asymmetry_mm: s.asymmetry_mm ?? s.asym_mm ?? null,
       stv_bilateral: s.stv_bilateral ?? s.short_term_variability ?? s.stv ?? null,
       corr_brightness: s.corr_brightness ?? s.brightness_corr ?? null,
       corr_depth: s.corr_depth ?? s.depth_corr ?? null,
     };
-  }
-  function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
-  const norm = useMemo(() => normalizeSummary(view?.summary || {}), [view]);
+  }, []);
+
+  const norm = useMemo(
+    () => normalizeSummary(view?.summary || {}),
+    [view, normalizeSummary]
+  );
   // ---------------------------------------------------------------------------------------------
 
   // Derive a clean diagnosis label + style (handles string OR {condition, confidence})
   const diagLabel = view?.diagnosis_final || '—';
   const diagKey = String(diagLabel || '').toLowerCase();
 
-  // Build a unified list of condition scores:
-  // - prefer `conditions: [{condition, confidence, reasons?}]`
-  // - else `scores: [{label, score, reasons?}]`
-  // - else `proba: {label: prob, ...}`
+  // Optional: list of condition scores if backend provides them
+  // Accepts either `conditions: [{condition, confidence, reasons?}]` or `scores: [{label, score}]`
   const scoredConditions = useMemo(() => {
-    if (Array.isArray(view?.conditions) && view.conditions.length) {
-      return view.conditions.map((c) => ({
-        condition: c.condition,
-        confidence: Number(c.confidence ?? 0),
-        reasons: arrReasons(c),
-      }));
+    const arrA = Array.isArray(view?.conditions) ? view.conditions : [];
+    const arrB = Array.isArray(view?.scores)
+      ? view.scores.map(s => ({ condition: s.label, confidence: s.score, reasons: s.reasons }))
+      : [];
+    const merged = [...arrA, ...arrB];
+    const seen = new Set();
+    const out = [];
+    for (const item of merged) {
+      const key = (item?.condition || '').toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
     }
-    if (Array.isArray(view?.scores) && view.scores.length) {
-      return view.scores.map((s) => ({
-        condition: s.label,
-        confidence: Number(s.score ?? 0),
-        reasons: arrReasons(s),
-      }));
-    }
-    if (view?.proba && typeof view.proba === 'object') {
-      return Object.entries(view.proba).map(([label, prob]) => ({
-        condition: label,
-        confidence: Number(prob ?? 0),
-      }));
-    }
-    return [];
+    return out;
   }, [view]);
-
-  function arrReasons(x) {
-    if (!x) return undefined;
-    if (Array.isArray(x.reasons)) return x.reasons;
-    if (Array.isArray(x.explanations)) return x.explanations;
-    if (typeof x.reason === 'string') return [x.reason];
-    if (typeof x.explanation === 'string') return [x.explanation];
-    if (Array.isArray(x.why)) return x.why;
-    return undefined;
-  }
 
   // final response time: prefer body field, else header
   const finalResponseMs = useMemo(() => {
@@ -243,100 +228,63 @@ curl -X POST ${endpoint} \\
   ${token ? `-H "Authorization: Bearer ${token}" \\\n  ` : ''}-F 'file=@"/path/to/your.csv"'`;
   }, [mode, endpoint, secret, token, metaText, analyze]);
 
-  // ---------- ALWAYS pick a single top condition ----------
-  const topCondKey = useMemo(() => {
-    if (!scoredConditions.length) return null;
-    let top = scoredConditions[0];
-    for (const c of scoredConditions) {
+  // ---------- NEW: reasons only for the highest-likelihood condition ----------
+  const pickTopConditionKey = useCallback((list, currentDiagKey) => {
+    if (!list?.length) return null;
+    let top = list[0];
+    for (const c of list) {
       if ((c.confidence || 0) > (top.confidence || 0)) top = c;
     }
-    const diagItem = scoredConditions.find(
-      c => String(c.condition || '').toLowerCase() === (diagKey || '')
+    const diagKeyLc = (currentDiagKey || '').toLowerCase();
+    const diagItem = list.find(
+      c => String(c.condition || '').toLowerCase() === diagKeyLc
     );
     if (diagItem && (diagItem.confidence || 0) >= (top.confidence || 0)) top = diagItem;
     return String(top.condition || '').toLowerCase();
-  }, [scoredConditions, diagKey]);
+  }, []);
 
-  // ---------- Heuristic reason builder (fallback if API provides none) ----------
-  function buildHeuristicReasons() {
-    const out = [];
-    const l = norm.left?.mean, r = norm.right?.mean;
-    const ls = norm.left?.std, rs = norm.right?.std;
-    const asym = num(norm.asymmetry_mm);
-    const stv = num(norm.stv_bilateral);
-
-    const cb = norm.corr_brightness;
-    const db = norm.corr_depth;
-
-    const corrFmt = (v) => (v == null || Number.isNaN(v)) ? '—' : v.toFixed(3);
-
-    if (asym != null && Math.abs(asym) >= 0.5) {
-      out.push(`Notable left–right pupil asymmetry (${fmt(asym)} mm).`);
-    }
-    if (stv != null && stv >= 0.2) {
-      out.push(`Elevated short-term variability (STV ${fmt(stv)}).`);
-    }
-
-    if (l != null && r != null) {
-      if (l >= 4.0 || r >= 4.0) out.push(`Dilated baseline pupil size (L ${fmt(l)} mm, R ${fmt(r)} mm).`);
-      if (l <= 2.0 || r <= 2.0) out.push(`Constricted baseline pupil size (L ${fmt(l)} mm, R ${fmt(r)} mm).`);
-    }
-
-    // brightness coupling
-    if (cb && typeof cb === 'object') {
-      const ml = num(cb.left), mr = num(cb.right);
-      const magL = ml != null ? Math.abs(ml) : null;
-      const magR = mr != null ? Math.abs(mr) : null;
-      if ((magL != null && magL >= 0.6) || (magR != null && magR >= 0.6)) {
-        out.push(`Strong coupling to brightness (corr L ${corrFmt(ml)}, R ${corrFmt(mr)}).`);
-      } else if ((magL != null && magL <= 0.25) && (magR != null && magR <= 0.25)) {
-        out.push(`Weak brightness–pupil coupling (corr L ${corrFmt(ml)}, R ${corrFmt(mr)}).`);
-      }
-    }
-
-    // depth coupling
-    if (db && typeof db === 'object') {
-      const dl = num(db.left), dr = num(db.right);
-      const magL = dl != null ? Math.abs(dl) : null;
-      const magR = dr != null ? Math.abs(dr) : null;
-      if ((magL != null && magL >= 0.6) || (magR != null && magR >= 0.6)) {
-        out.push(`Pupil size varies with depth (corr L ${corrFmt(dl)}, R ${corrFmt(dr)}).`);
-      }
-    }
-
-    if (ls != null && rs != null) {
-      if (ls >= 0.5 || rs >= 0.5) {
-        out.push(`High per-eye variability (std L ${fmt(ls)}, R ${fmt(rs)}).`);
-      }
-    }
-
-    return out.slice(0, 6); // keep tidy
-  }
-
-  // ---------- ALWAYS compute reasons for the top condition ----------
-  const topReasons = useMemo(() => {
-    if (!topCondKey) return [];
-
-    // 1) inline reasons on the top scored item
-    const topItem = scoredConditions.find(
-      c => String(c.condition || '').toLowerCase() === topCondKey
-    );
-    const inline = topItem?.reasons;
+  const buildHeuristicReasons = useCallback((topKey, list, v) => {
+    if (!topKey) return [];
+    // 1) inline reasons on the top item
+    const topItem = list.find(c => String(c.condition || '').toLowerCase() === topKey);
+    const inline = topItem?.reasons ?? (topItem?.reason ? [topItem.reason] : []);
     if (Array.isArray(inline) && inline.length) return inline;
 
     // 2) explanations map from backend
-    const ex = view?.explanations?.[topCondKey];
+    const ex = v?.explanations?.[topKey];
     if (Array.isArray(ex) && ex.length) return ex;
-    if (typeof ex === 'string' && ex.trim()) return [ex];
+    if (typeof ex === 'string' && ex) return [ex];
 
-    // 3) root reasons fallback
-    if (Array.isArray(view?.reasons) && view.reasons.length) return view.reasons;
-    if (typeof view?.reasons === 'string' && view.reasons.trim()) return [view.reasons];
+    // 3) fallback to root reasons
+    if (Array.isArray(v?.reasons) && v.reasons.length) return v.reasons;
+    if (typeof v?.reasons === 'string' && v.reasons) return [v.reasons];
 
-    // 4) last resort: generate heuristic reasons from summary metrics
-    return buildHeuristicReasons();
-  }, [topCondKey, scoredConditions, view, norm]);
-  // -------------------------------------------------------
+    // 4) final guard: synthesize a minimal explanation from summary
+    const notes = [];
+    if (v?.summary) {
+      const s = v.summary;
+      if (s.asymmetry_mm != null) notes.push(`Asymmetry: ${fmt(s.asymmetry_mm)} mm`);
+      if (s.stv_bilateral != null) notes.push(`Short-term variability: ${fmt(s.stv_bilateral)}`);
+      if (s.left?.mean != null && s.right?.mean != null) {
+        notes.push(`Pupil means L/R: ${fmt(s.left.mean)} / ${fmt(s.right.mean)} mm`);
+      }
+      if (s.corr_brightness?.left != null && s.corr_brightness?.right != null) {
+        notes.push(`Brightness corr L/R: ${fmt(s.corr_brightness.left)} / ${fmt(s.corr_brightness.right)}`);
+      }
+    }
+    return notes;
+  }, [fmt]);
+
+  const topCondKey = useMemo(
+    () => pickTopConditionKey(scoredConditions, diagKey),
+    [scoredConditions, diagKey, pickTopConditionKey]
+  );
+
+  const topReasons = useMemo(
+    () => buildHeuristicReasons(topCondKey, scoredConditions, view),
+    [topCondKey, scoredConditions, view, buildHeuristicReasons]
+  );
+  // -------------------------------------------------------------------------------
 
   return (
     <div style={S.page}>
@@ -470,11 +418,7 @@ curl -X POST ${endpoint} \\
             <KV k="Rows" v={view?.n_rows ?? '—'} />
             <KV
               k="Diagnosis"
-              v={
-                <span style={{ ...S.badge, ...badgeStyle(diagKey) }}>
-                  {diagLabel}
-                </span>
-              }
+              v={<span style={{ ...S.badge, ...badgeStyle(diagKey) }}>{diagLabel}</span>}
             />
             <KV k="Left (mean ± std)"  v={`${fmt(norm.left?.mean)} ± ${fmt(norm.left?.std)}`} />
             <KV k="Right (mean ± std)" v={`${fmt(norm.right?.mean)} ± ${fmt(norm.right?.std)}`} />
@@ -498,11 +442,11 @@ curl -X POST ${endpoint} \\
             />
           </div>
 
-          {/* Per-condition confidences with reasons ONLY for the top condition */}
+          {/* Per-condition confidences with reasons ONLY on the top condition */}
           {scoredConditions.length > 0 && (
             <>
               <h4 style={S.subTitle}>Condition likelihoods</h4>
-              <div style={{ display: 'grid', gap: 8 }}>
+              <div style={{ display: 'grid,', gap: 8 }}>
                 {scoredConditions.map((c, i) => {
                   const key = String(c.condition || '').toLowerCase();
                   const pct = Math.round((c.confidence || 0) * 100);
@@ -513,11 +457,7 @@ curl -X POST ${endpoint} \\
                       <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 60px', gap: 8, alignItems: 'center' }}>
                         <div style={{ fontSize: 14 }}>{prettyCond(c.condition)}</div>
                         <div style={{ height: 10, background: '#eef5fa', borderRadius: 8, overflow: 'hidden' }}>
-                          <div style={{
-                            width: `${Math.max(0, Math.min(100, pct))}%`,
-                            height: '100%',
-                            background: COLORS.brand
-                          }} />
+                          <div style={{ width: `${Math.max(0, Math.min(100, pct))}%`, height: '100%', background: COLORS.brand }} />
                         </div>
                         <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                           {pct}%
