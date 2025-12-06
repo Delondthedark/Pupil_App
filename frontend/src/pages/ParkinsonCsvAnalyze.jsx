@@ -3,26 +3,32 @@ import React, { useMemo, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../auth/AuthContext';
 
 export default function ParkinsonCsvAnalyze() {
-  const API = process.env.REACT_APP_API_BASE_URL;       // e.g. http://localhost:3001
+  const API = process.env.REACT_APP_API_BASE_URL;           // e.g. http://localhost:3001
   const DEFAULT_SECRET = process.env.REACT_APP_INGEST_SECRET || '';
   const { token } = useAuth();
 
-  // UI + state
-  const [mode, setMode] = useState('test');             // 'test' | 'partner'
+  // UI state
+  const [mode, setMode] = useState('test');                 // 'test' | 'partner'
   const [secret, setSecret] = useState(DEFAULT_SECRET);
-  const [analyze, setAnalyze] = useState(true);
+  const [analyze, setAnalyze] = useState(true);             // controls ?analyze=1 in test mode OR body flag in partner mode
   const [metaText, setMetaText] = useState('{\n  "testId": "abc123"\n}');
-
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
-  const [respHeaderMs, setRespHeaderMs] = useState(null); // capture X-Response-Time-Ms
+  const [respHeaderMs, setRespHeaderMs] = useState(null);   // capture X-Response-Time-Ms
 
   const fileInputRef = useRef(null);
-  const endpoint = mode === 'partner' ? `${API}/api/ingest` : `${API}/api/ingest/test`;
 
-  // --- helpers ---
+  // Build endpoint. In Test mode we append ?analyze=1 if the toggle is on.
+  const endpoint = useMemo(() => {
+    if (mode === 'partner') return `${API}/api/ingest`;
+    const u = new URL(`${API}/api/ingest/test`);
+    if (analyze) u.searchParams.set('analyze', '1');
+    return u.toString();
+  }, [API, mode, analyze]);
+
+  // Helpers
   const fileToBase64 = (f) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -44,35 +50,15 @@ export default function ParkinsonCsvAnalyze() {
     }
     setFile(f);
   };
-
   const onBrowse = (e) => onPick(e.target.files?.[0]);
-
-  const onDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const f = e.dataTransfer?.files?.[0];
-    onPick(f);
-  };
-
-  const onDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const clearFile = () => {
-    setFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+  const onDrop = (e) => { e.preventDefault(); e.stopPropagation(); onPick(e.dataTransfer?.files?.[0]); };
+  const onDragOver = (e) => { e.preventDefault(); e.stopPropagation(); };
+  const clearFile = () => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; };
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setResult(null);
-    setRespHeaderMs(null);
-    if (!file) {
-      setError('Choose a CSV file first.');
-      return;
-    }
+    setError(''); setResult(null); setRespHeaderMs(null);
+    if (!file) { setError('Choose a CSV file first.'); return; }
 
     try {
       setBusy(true);
@@ -112,7 +98,6 @@ export default function ParkinsonCsvAnalyze() {
         });
       }
 
-      // capture final response time header if present
       const headerMs = res.headers.get('x-response-time-ms');
       if (headerMs != null) setRespHeaderMs(headerMs);
 
@@ -120,11 +105,8 @@ export default function ParkinsonCsvAnalyze() {
       let data;
       try { data = JSON.parse(text); }
       catch {
-        if (!res.ok) {
-          throw new Error(`Upload failed (${res.status}). Raw response: ${text.slice(0, 240)}…`);
-        } else {
-          throw new Error('Unexpected response (not JSON).');
-        }
+        if (!res.ok) throw new Error(`Upload failed (${res.status}). Raw response: ${text.slice(0, 240)}…`);
+        throw new Error('Unexpected response (not JSON).');
       }
       if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
       setResult(data);
@@ -147,10 +129,10 @@ export default function ParkinsonCsvAnalyze() {
     URL.revokeObjectURL(url);
   };
 
-  // Normalize for display
+  // View model
   const view = useMemo(() => result?.analysis ?? result ?? null, [result]);
 
-  // ---------------- schema-tolerant summary normalizer (old & new analyzer keys) ----------------
+  // Tolerant normalizer (works with both old/new keys)
   const fmt = useCallback((v) => {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
     const n = Number(v);
@@ -169,19 +151,12 @@ export default function ParkinsonCsvAnalyze() {
       corr_depth: s.corr_depth ?? s.depth_corr ?? null,
     };
   }, []);
+  const norm = useMemo(() => normalizeSummary(view?.summary || {}), [view, normalizeSummary]);
 
-  const norm = useMemo(
-    () => normalizeSummary(view?.summary || {}),
-    [view, normalizeSummary]
-  );
-  // ---------------------------------------------------------------------------------------------
-
-  // Derive a clean diagnosis label + style (handles string OR {condition, confidence})
+  // Diagnosis + likelihoods
   const diagLabel = view?.diagnosis_final || '—';
   const diagKey = String(diagLabel || '').toLowerCase();
 
-  // Optional: list of condition scores if backend provides them
-  // Accepts either `conditions: [{condition, confidence, reasons?}]` or `scores: [{label, score}]`
   const scoredConditions = useMemo(() => {
     const arrA = Array.isArray(view?.conditions) ? view.conditions : [];
     const arrB = Array.isArray(view?.scores)
@@ -199,7 +174,6 @@ export default function ParkinsonCsvAnalyze() {
     return out;
   }, [view]);
 
-  // final response time: prefer body field, else header
   const finalResponseMs = useMemo(() => {
     if (result?.response_time_ms != null) return Number(result.response_time_ms);
     if (respHeaderMs != null) return Number(respHeaderMs);
@@ -211,7 +185,7 @@ export default function ParkinsonCsvAnalyze() {
       const sec = secret || 'YOUR_SECRET';
       return `b64=$(base64 -i "/path/to/your.csv" | tr -d '\\n')
 
-curl -X POST ${endpoint} \\
+curl -X POST ${API}/api/ingest \\
   -H "Content-Type: application/json" \\
   -H "X-Shared-Secret: ${sec}"${
     token ? ` \\\n  -H "Authorization: Bearer ${token}"` : ''
@@ -224,11 +198,10 @@ curl -X POST ${endpoint} \\
     "analyze": ${String(analyze)}
   }'`;
     }
-    return `curl -X POST ${endpoint} \\
+    return `curl -X POST "${API}/api/ingest/test${analyze ? '?analyze=1' : ''}" \\
   ${token ? `-H "Authorization: Bearer ${token}" \\\n  ` : ''}-F 'file=@"/path/to/your.csv"'`;
-  }, [mode, endpoint, secret, token, metaText, analyze]);
+  }, [API, mode, secret, token, metaText, analyze]);
 
-  // ---------- NEW: reasons only for the highest-likelihood condition ----------
   const pickTopConditionKey = useCallback((list, currentDiagKey) => {
     if (!list?.length) return null;
     let top = list[0];
@@ -245,29 +218,23 @@ curl -X POST ${endpoint} \\
 
   const buildHeuristicReasons = useCallback((topKey, list, v) => {
     if (!topKey) return [];
-    // 1) inline reasons on the top item
     const topItem = list.find(c => String(c.condition || '').toLowerCase() === topKey);
     const inline = topItem?.reasons ?? (topItem?.reason ? [topItem.reason] : []);
     if (Array.isArray(inline) && inline.length) return inline;
 
-    // 2) explanations map from backend
     const ex = v?.explanations?.[topKey];
     if (Array.isArray(ex) && ex.length) return ex;
     if (typeof ex === 'string' && ex) return [ex];
 
-    // 3) fallback to root reasons
     if (Array.isArray(v?.reasons) && v.reasons.length) return v.reasons;
     if (typeof v?.reasons === 'string' && v.reasons) return [v.reasons];
 
-    // 4) final guard: synthesize a minimal explanation from summary
     const notes = [];
     if (v?.summary) {
       const s = v.summary;
       if (s.asymmetry_mm != null) notes.push(`Asymmetry: ${fmt(s.asymmetry_mm)} mm`);
       if (s.stv_bilateral != null) notes.push(`Short-term variability: ${fmt(s.stv_bilateral)}`);
-      if (s.left?.mean != null && s.right?.mean != null) {
-        notes.push(`Pupil means L/R: ${fmt(s.left.mean)} / ${fmt(s.right.mean)} mm`);
-      }
+      if (s.left?.mean != null && s.right?.mean != null) notes.push(`Pupil means L/R: ${fmt(s.left.mean)} / ${fmt(s.right.mean)} mm`);
       if (s.corr_brightness?.left != null && s.corr_brightness?.right != null) {
         notes.push(`Brightness corr L/R: ${fmt(s.corr_brightness.left)} / ${fmt(s.corr_brightness.right)}`);
       }
@@ -279,12 +246,10 @@ curl -X POST ${endpoint} \\
     () => pickTopConditionKey(scoredConditions, diagKey),
     [scoredConditions, diagKey, pickTopConditionKey]
   );
-
   const topReasons = useMemo(
     () => buildHeuristicReasons(topCondKey, scoredConditions, view),
     [topCondKey, scoredConditions, view, buildHeuristicReasons]
   );
-  // -------------------------------------------------------------------------------
 
   return (
     <div style={S.page}>
@@ -294,82 +259,51 @@ curl -X POST ${endpoint} \\
         <div style={S.hSub}>Upload a pupil-tracking CSV to analyze preliminary markers.</div>
       </div>
 
-      {/* Mode Switch */}
+      {/* Mode + analyze toggle */}
       <div style={S.card}>
         <div style={S.tabs}>
-          <button
-            type="button"
-            onClick={() => setMode('test')}
-            style={{ ...S.tab, ...(mode === 'test' ? S.tabActive : {}) }}
-          >
+          <button type="button" onClick={() => setMode('test')}
+            style={{ ...S.tab, ...(mode === 'test' ? S.tabActive : {}) }}>
             UI Test (multipart)
           </button>
-          <button
-            type="button"
-            onClick={() => setMode('partner')}
-            style={{ ...S.tab, ...(mode === 'partner' ? S.tabActive : {}) }}
-          >
+          <button type="button" onClick={() => setMode('partner')}
+            style={{ ...S.tab, ...(mode === 'partner' ? S.tabActive : {}) }}>
             Partner JSON (base64 + secret)
           </button>
+        </div>
+
+        <div style={S.row}>
+          <label style={{ ...S.label, width: 'auto' }}>
+            <input type="checkbox" checked={analyze} onChange={(e) => setAnalyze(e.target.checked)} />{' '}
+            Analyze on upload {mode === 'test' && <span style={{ color: COLORS.note }}>(adds <code>?analyze=1</code>)</span>}
+          </label>
         </div>
 
         {mode === 'partner' && (
           <div style={S.panel}>
             <div style={S.row}>
               <label style={S.label}>Shared secret</label>
-              <input
-                type="password"
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                placeholder="X-Shared-Secret"
-                style={S.input}
-              />
-            </div>
-            <div style={S.row}>
-              <label style={{ ...S.label, width: 'auto' }}>
-                <input
-                  type="checkbox"
-                  checked={analyze}
-                  onChange={(e) => setAnalyze(e.target.checked)}
-                />{' '}
-                Analyze on upload
-              </label>
+              <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
+                     placeholder="X-Shared-Secret" style={S.input} />
             </div>
             <div style={S.rowCol}>
               <label style={S.label}>Meta (JSON)</label>
-              <textarea
-                rows={5}
-                value={metaText}
-                onChange={(e) => setMetaText(e.target.value)}
-                style={S.textarea}
-                spellCheck={false}
-              />
+              <textarea rows={5} value={metaText} onChange={(e) => setMetaText(e.target.value)}
+                        style={S.textarea} spellCheck={false} />
             </div>
           </div>
         )}
 
         {/* Dropzone */}
-        <div
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          style={S.drop}
-          onClick={() => fileInputRef.current?.click()}
-          role="button"
-          aria-label="Upload CSV"
-          title="Click to choose file or drag & drop"
-        >
+        <div onDrop={onDrop} onDragOver={onDragOver} style={S.drop}
+             onClick={() => fileInputRef.current?.click()}
+             role="button" aria-label="Upload CSV" title="Click to choose file or drag & drop">
           <div style={S.dropIcon}>📄</div>
           <div style={S.dropTitle}>Drop CSV here or click to choose</div>
           <div style={S.dropHint}>
-            Accepted: .csv (Left/Right pupil size, <strong>Illuminance</strong> &amp; <strong>depth</strong> required)
+            Accepted: .csv (Left/Right columns required; brightness &amp; depth recommended)
           </div>
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            style={{ display: 'none' }}
-            ref={fileInputRef}
-            onChange={onBrowse}
-          />
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onBrowse} />
         </div>
 
         {/* Chosen file */}
@@ -382,12 +316,8 @@ curl -X POST ${endpoint} \\
 
         {/* Action */}
         <div style={S.actions}>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={busy || !file}
-            style={{ ...S.primaryBtn, opacity: busy || !file ? 0.7 : 1 }}
-          >
+          <button type="button" onClick={onSubmit} disabled={busy || !file}
+                  style={{ ...S.primaryBtn, opacity: busy || !file ? 0.7 : 1 }}>
             {busy ? 'Analyzing…' : 'Upload & Analyze'}
           </button>
         </div>
@@ -407,7 +337,6 @@ curl -X POST ${endpoint} \\
             </div>
           )}
 
-          {/* final response time */}
           {finalResponseMs != null && (
             <div style={S.smallNote}>
               Response time: <strong>{finalResponseMs.toFixed(1)} ms</strong>
@@ -426,27 +355,23 @@ curl -X POST ${endpoint} \\
             <KV k="STV (bilateral)"    v={fmt(norm.stv_bilateral)} />
             <KV
               k="Brightness corr (L / R)"
-              v={
-                norm.corr_brightness
-                  ? `${fmt(norm.corr_brightness.left)} / ${fmt(norm.corr_brightness.right)}`
-                  : '— / —'
-              }
+              v={norm.corr_brightness
+                ? `${fmt(norm.corr_brightness.left)} / ${fmt(norm.corr_brightness.right)}`
+                : '— / —'}
             />
             <KV
               k="Depth corr (L / R)"
-              v={
-                norm.corr_depth
-                  ? `${fmt(norm.corr_depth.left)} / ${fmt(norm.corr_depth.right)}`
-                  : '— / —'
-              }
+              v={norm.corr_depth
+                ? `${fmt(norm.corr_depth.left)} / ${fmt(norm.corr_depth.right)}`
+                : '— / —'}
             />
           </div>
 
-          {/* Per-condition confidences with reasons ONLY on the top condition */}
+          {/* Likelihood bars; show reasons only for top condition */}
           {scoredConditions.length > 0 && (
             <>
               <h4 style={S.subTitle}>Condition likelihoods</h4>
-              <div style={{ display: 'grid,', gap: 8 }}>
+              <div style={{ display: 'grid', gap: 8 }}>
                 {scoredConditions.map((c, i) => {
                   const key = String(c.condition || '').toLowerCase();
                   const pct = Math.round((c.confidence || 0) * 100);
@@ -485,14 +410,13 @@ curl -X POST ${endpoint} \\
             <button onClick={downloadJSON} style={S.secondaryBtn}>⬇️ Download JSON</button>
           </div>
 
-          {/* Debug timings (hidden by default if not present) */}
           {view?.timings && (
             <details style={{ marginTop: 12 }}>
               <summary>Debug: timings</summary>
               <pre style={S.pre}>{JSON.stringify(view.timings, null, 2)}</pre>
             </details>
           )}
-        </div> 
+        </div>
       )}
 
       {/* Debug cURL */}
@@ -506,8 +430,7 @@ curl -X POST ${endpoint} \\
   );
 }
 
-
-/* ---------- Small presentational helpers ---------- */
+/* ---- Presentational helpers ---- */
 function KV({ k, v }) {
   return (
     <div style={S.kv}>
@@ -537,11 +460,10 @@ function badgeStyle(diagKey) {
     return { background: '#E6FFFB', color: '#00796B', border: '1px solid #B2F5EA' };
   if (d === 'flagged')
     return { background: '#FFEDED', color: '#B71C1C', border: '1px solid #F5C2C2' };
-  // PTSD / High Stress / Parkinson / Alzheimer / review_recommended / others
   return { background: '#FFF7E6', color: '#8B5E00', border: '1px solid #FFE58F' };
 }
 
-/* ---------- Styles (brand-aligned, clean) ---------- */
+/* ---- Styles ---- */
 const COLORS = {
   brand: '#1B5A72',
   text: '#2E4057',
@@ -551,54 +473,25 @@ const COLORS = {
 
 const S = {
   page: { maxWidth: 980, margin: '0 auto', padding: '16px', color: COLORS.text, fontFamily: 'Segoe UI, sans-serif' },
-
   header: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 },
-  logo: { height: 36, objectFit: 'contain' },
   hTitle: { margin: 0, color: COLORS.brand, fontSize: '1.6rem' },
   hSub: { color: COLORS.note, marginTop: 2 },
 
-  card: {
-    background: '#fff',
-    border: `1px solid ${COLORS.cardBorder}`,
-    borderRadius: 12,
-    padding: 16,
-    boxShadow: '0 6px 18px rgba(0,0,0,0.04)',
-  },
+  card: { background: '#fff', border: `1px solid ${COLORS.cardBorder}`, borderRadius: 12, padding: 16, boxShadow: '0 6px 18px rgba(0,0,0,0.04)' },
 
   tabs: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
-  tab: {
-    background: '#F7FBFF',
-    border: `1px solid ${COLORS.cardBorder}`,
-    padding: '8px 12px',
-    borderRadius: 8,
-    cursor: 'pointer',
-    color: COLORS.text,
-  },
+  tab: { background: '#F7FBFF', border: `1px solid ${COLORS.cardBorder}`, padding: '8px 12px', borderRadius: 8, cursor: 'pointer', color: COLORS.text },
   tabActive: { background: '#D9F1FF', color: COLORS.brand, fontWeight: 600 },
 
-  panel: {
-    background: '#FBFEFF',
-    border: `1px solid ${COLORS.cardBorder}`,
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 6,
-    marginBottom: 12,
-  },
+  panel: { background: '#FBFEFF', border: `1px solid ${COLORS.cardBorder}`, borderRadius: 10, padding: 12, marginTop: 6, marginBottom: 12 },
+
   row: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 },
   rowCol: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 },
   label: { width: 140, color: COLORS.note, fontSize: 13 },
   input: { padding: 10, border: '1px solid #d9e6ee', borderRadius: 8, flex: 1 },
   textarea: { padding: 10, border: '1px solid #d9e6ee', borderRadius: 8, width: '100%', fontFamily: 'monospace' },
 
-  drop: {
-    marginTop: 8,
-    border: '2px dashed #b7d4e2',
-    borderRadius: 12,
-    padding: 24,
-    textAlign: 'center',
-    background: '#FAFDFF',
-    cursor: 'pointer'
-  },
+  drop: { marginTop: 8, border: '2px dashed #b7d4e2', borderRadius: 12, padding: 24, textAlign: 'center', background: '#FAFDFF', cursor: 'pointer' },
   dropIcon: { fontSize: 28, marginBottom: 6 },
   dropTitle: { fontWeight: 600, color: COLORS.brand },
   dropHint: { color: COLORS.note, fontSize: 13 },
@@ -608,29 +501,12 @@ const S = {
   linkBtn: { background: 'transparent', border: 'none', color: COLORS.brand, cursor: 'pointer', fontWeight: 600 },
 
   actions: { marginTop: 12 },
-  primaryBtn: {
-    padding: '10px 16px',
-    borderRadius: 8,
-    border: 'none',
-    background: COLORS.brand,
-    color: '#fff',
-    cursor: 'pointer',
-    fontWeight: 600
-  },
-  secondaryBtn: {
-    padding: '10px 16px',
-    borderRadius: 8,
-    border: '1px solid #d9e6ee',
-    background: '#fff',
-    color: COLORS.brand,
-    cursor: 'pointer',
-    fontWeight: 600
-  },
+  primaryBtn: { padding: '10px 16px', borderRadius: 8, border: 'none', background: COLORS.brand, color: '#fff', cursor: 'pointer', fontWeight: 600 },
+  secondaryBtn: { padding: '10px 16px', borderRadius: 8, border: '1px solid #d9e6ee', background: '#fff', color: COLORS.brand, cursor: 'pointer', fontWeight: 600 },
 
   error: { marginTop: 12, background: '#fff2f0', color: '#a8071a', padding: '10px 12px', borderRadius: 8, border: '1px solid #ffccc7' },
 
   sectionTitle: { margin: 0, color: COLORS.brand, marginBottom: 8 },
-
   smallNote: { fontSize: 13, color: COLORS.note, marginBottom: 8 },
 
   grid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginTop: 8 },
@@ -639,7 +515,6 @@ const S = {
   v: { fontWeight: 600, marginTop: 2 },
 
   badge: { padding: '4px 8px', borderRadius: 20, display: 'inline-block', fontWeight: 700, textTransform: 'capitalize' },
-
   subTitle: { marginTop: 14, marginBottom: 6, color: COLORS.text },
 
   pre: { background: '#0f172a', color: '#e2e8f0', padding: 12, borderRadius: 8, overflowX: 'auto', marginTop: 8 },

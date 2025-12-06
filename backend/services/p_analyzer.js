@@ -1,217 +1,94 @@
 // backend/services/p_analyzer.js
-import { parse } from 'csv-parse/sync';
-import fetch from 'node-fetch';
 
-/** ---- Helpers ---- */
-const toNum = (v) => {
-  if (v == null) return NaN;
-  const s = String(v).replace(/[^\d.\-eE]/g, '');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n : NaN;
+const HEADERS_HINT = {
+  left:  ['left','left_mm','l_pupil','pupil_l','lpupil','leftpupil','left_pupil','left (mm)'],
+  right: ['right','right_mm','r_pupil','pupil_r','rpupil','rightpupil','right_pupil','right (mm)'],
+  bright:['brightness','bright','illum','luma','light','brightness_lux'],
+  depth: ['depth','z','distance','range','z_mm']
 };
-const mean = (a) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
-const std = (a, m = mean(a)) =>
-  Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / (a.length || 1));
 
-/** Pearson correlation */
-function corr(a, b) {
-  const n = Math.min(a.length, b.length);
-  if (n === 0) return NaN;
-  const ma = mean(a), mb = mean(b);
-  let num = 0, da = 0, db = 0;
-  for (let i = 0; i < n; i++) {
-    num += (a[i] - ma) * (b[i] - mb);
-    da += (a[i] - ma) ** 2;
-    db += (b[i] - mb) ** 2;
+function findCol(headers, wanted) {
+  const lc = headers.map(h => (h ?? '').toString().trim().toLowerCase());
+  for (const name of wanted) {
+    const i = lc.indexOf(name);
+    if (i !== -1) return headers[i];
   }
-  const denom = Math.sqrt(da * db);
-  return denom === 0 ? NaN : (num / denom);
+  for (const name of wanted) {
+    const i = lc.findIndex(h => h.includes(name));
+    if (i !== -1) return headers[i];
+  }
+  return null;
 }
 
-/** Map CSV headers */
-function mapColumns(row0) {
-  const col = {};
-  for (const key of Object.keys(row0)) {
-    const nk = key.toLowerCase().trim();
-    if (nk.includes('frame')) col.frame = key;
-    if (nk.includes('left') && nk.includes('pupil')) col.left = key;
-    if (nk.includes('right') && nk.includes('pupil')) col.right = key;
-    if (nk.includes('illuminance') || nk.includes('lux') || nk.includes('brightness')) col.brightness = key;
-    if (nk.includes('depth') || nk.includes('distance')) col.depth = key;
-  }
-  if (!col.left || !col.right) throw new Error('CSV must include Left/Right Pupil Size columns');
-  if (!col.brightness) throw new Error('CSV must include Illuminance / Brightness column');
-  if (!col.depth) throw new Error('CSV must include Depth column');
-  return col;
-}
-
-/** Build human-readable reasons per condition from features */
-function reasonsByCondition(conf, f) {
-  // f: feature object containing L_mean,R_mean,L_std,R_std,asym,stv,corr_b_l,corr_b_r,corr_d_l,corr_d_r
-  const r = {};
-
-  const hiVar   = (f.L_std > 0.20 || f.R_std > 0.20 || f.stv > 0.25);
-  const loVar   = (f.L_std < 0.08 && f.R_std < 0.08 && f.stv < 0.12);
-  const asymHi  = (f.asym > 0.4);
-  const asymMod = (f.asym > 0.2 && f.asym <= 0.4);
-  const corrBpos = (f.corr_b_l > 0.4 && f.corr_b_r > 0.4);
-  const corrBneg = (f.corr_b_l < -0.35 && f.corr_b_r < -0.35);
-  const corrDpos = (f.corr_d_l > 0.3 && f.corr_d_r > 0.3);
-  const corrDneg = (f.corr_d_l < -0.3 && f.corr_d_r < -0.3);
-  const weakCorr = (Math.abs(f.corr_b_l) < 0.2 && Math.abs(f.corr_b_r) < 0.2);
-
-  // Parkinson
-  r.parkinson = [];
-  if (loVar) r.parkinson.push('Low short-term variability in pupil size');
-  if (weakCorr) r.parkinson.push('Weak coupling with illuminance');
-  if (!asymMod && !asymHi) r.parkinson.push('Minimal L/R asymmetry');
-
-  // Alzheimer’s
-  r.alzheimers = [];
-  if (asymHi || asymMod) r.alzheimers.push('Pronounced left/right asymmetry');
-  if (!loVar) r.alzheimers.push('Moderate variability observed');
-
-  // High Stress
-  r.stress = [];
-  if (hiVar) r.stress.push('Elevated variability (std/stv) consistent with arousal');
-  if (corrBpos) r.stress.push('Strong positive correlation with illuminance');
-
-  // PTSD
-  r.ptsd = [];
-  if (!asymHi && !asymMod) r.ptsd.push('Small L/R asymmetry');
-  if (corrBneg) r.ptsd.push('Negative correlation with illuminance (pupil constriction under brightening)');
-
-  // ADHD
-  r.adhd = [];
-  if (hiVar && weakCorr) r.adhd.push('High variability with weak brightness coupling');
-  if (corrDpos) r.adhd.push('Positive association with depth (task/engagement-like changes)');
-
-  // Depression
-  r.depression = [];
-  if (loVar) r.depression.push('Reduced variability across frames');
-  if (corrDneg) r.depression.push('Inverse association with depth');
-
-  // Clear / Review Recommended
-  r.clear = [];
-  if (!hiVar && !asymHi && !asymMod && weakCorr) r.clear.push('Stable bilateral response with minimal asymmetry');
-
-  r.review_recommended = ['Insufficient signal separation across features'];
-
-  // Return per item in conf (array of {condition, confidence})
-  return conf.map((item) => {
-    const key = String(item.condition || '').toLowerCase();
-    const reasons = r[key] && r[key].length ? r[key] : [];
-    return { ...item, reasons };
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const cells = line.split(',');
+    const row = {};
+    headers.forEach((h, i) => { row[h] = (cells[i] ?? '').trim(); });
+    return row;
   });
 }
 
-/** ---- Main ---- */
-export async function analyzeCsvBuffer(csvBuffer) {
-  const t0 = Date.now();
+export function normalizeAndSummarize(csvText) {
+  const rows = parseCsv(csvText);
+  if (!rows.length) { const e = new Error('empty_csv'); e.code = 'empty_csv'; throw e; }
 
-  const text = csvBuffer.toString('utf8');
-  const rows = parse(text, { columns: true, skip_empty_lines: true, trim: true });
-  if (!rows.length) throw new Error('CSV is empty');
+  const headers = Object.keys(rows[0]);
+  const cLeft   = findCol(headers, HEADERS_HINT.left);
+  const cRight  = findCol(headers, HEADERS_HINT.right);
+  const cBright = findCol(headers, HEADERS_HINT.bright);
+  const cDepth  = findCol(headers, HEADERS_HINT.depth);
 
-  const col = mapColumns(rows[0]);
-  const series = [];
-  for (const r of rows) {
-    const frame = col.frame ? toNum(r[col.frame]) : series.length;
-    const left = toNum(r[col.left]);
-    const right = toNum(r[col.right]);
-    const bright = toNum(r[col.brightness]);        // now required
-    const depth = toNum(r[col.depth]);              // now required
-    if ([left, right, bright, depth].every(Number.isFinite)) {
-      series.push({ frame, left, right, bright, depth });
-    }
-  }
-  if (!series.length) throw new Error('No valid numeric rows found');
-
-  const leftArr   = series.map(s => s.left);
-  const rightArr  = series.map(s => s.right);
-  const brightArr = series.map(s => s.bright);
-  const depthArr  = series.map(s => s.depth);
-
-  // Simple summary stats
-  const L_mean = mean(leftArr);
-  const R_mean = mean(rightArr);
-  const L_std  = std(leftArr, L_mean);
-  const R_std  = std(rightArr, R_mean);
-  const asym   = Math.abs(L_mean - R_mean);
-  const stv    = std(leftArr.concat(rightArr));
-
-  // Correlations (brightness & depth)
-  const corr_L_B = corr(leftArr,  brightArr);
-  const corr_R_B = corr(rightArr, brightArr);
-  const corr_L_D = corr(leftArr,  depthArr);
-  const corr_R_D = corr(rightArr, depthArr);
-
-  const features = {
-    L_mean, R_mean, L_std, R_std, asym, stv,
-    corr_b_l: Number.isFinite(corr_L_B) ? corr_L_B : 0,
-    corr_b_r: Number.isFinite(corr_R_B) ? corr_R_B : 0,
-    corr_d_l: Number.isFinite(corr_L_D) ? corr_L_D : 0,
-    corr_d_r: Number.isFinite(corr_R_D) ? corr_R_D : 0
-  };
-
-  const summary = {
-    left:  { mean: +L_mean.toFixed(3), std: +L_std.toFixed(3) },
-    right: { mean: +R_mean.toFixed(3), std: +R_std.toFixed(3) },
-    asymmetry_mm: +asym.toFixed(3),
-    stv_bilateral: +stv.toFixed(3),
-    corr_brightness: {
-      left: +features.corr_b_l.toFixed(3),
-      right: +features.corr_b_r.toFixed(3),
-    },
-    corr_depth: {
-      left: +features.corr_d_l.toFixed(3),
-      right: +features.corr_d_r.toFixed(3),
-    }
-  };
-
-  // ---- ML Prediction ----
-  let ml_prediction = null;
-  try {
-    const mlBase = process.env.ML_BASE_URL || 'http://localhost:8000';
-    const mlRes = await fetch(`${mlBase}/ml/predict`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        n: series.length,
-        L_mean, R_mean,
-        L_std, R_std,
-        asym,
-        corr_L_B: features.corr_b_l,
-        corr_R_B: features.corr_b_r,
-        stv,
-      }),
-    });
-    if (mlRes.ok) {
-      ml_prediction = await mlRes.json();
-    } else {
-      console.error('ML service error:', mlRes.status);
-    }
-  } catch (e) {
-    console.error('Error calling ML service:', e.message);
+  if (!cLeft || !cRight) {
+    const msg = `CSV must include Left/Right Pupil columns (accepted: ${HEADERS_HINT.left.join('/')}, ${HEADERS_HINT.right.join('/')})`;
+    const err = new Error(msg); err.code = 'missing_left_right'; throw err;
   }
 
-  // Build conditions array + reasons
-  const baseConds = ml_prediction?.proba
-    ? Object.entries(ml_prediction.proba)
-        .map(([condition, confidence]) => ({ condition, confidence }))
-    : [];
+  const series = rows.map(r => ({
+    left: Number(r[cLeft]),
+    right: Number(r[cRight]),
+    brightness: cBright ? Number(r[cBright]) : null,
+    depth: cDepth ? Number(r[cDepth]) : null
+  })).filter(r => Number.isFinite(r.left) && Number.isFinite(r.right));
 
-  const conditionsWithReasons = reasonsByCondition(baseConds, features);
+  if (!series.length) { const e = new Error('no_numeric_rows'); e.code = 'no_numeric_rows'; throw e; }
 
-  const elapsed = Date.now() - t0;
+  const n = series.length;
+  const mean = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+  const std  = arr => { const m = mean(arr); return Math.sqrt(arr.reduce((s,x)=>s+(x-m)*(x-m),0)/(arr.length||1)); };
+  const L = series.map(s=>s.left);
+  const R = series.map(s=>s.right);
+  const bright = cBright ? series.map(s=>s.brightness) : null;
+  const depth  = cDepth  ? series.map(s=>s.depth)      : null;
+
+  function corr(a, b) {
+    const mA = mean(a), mB = mean(b);
+    let num=0, dA=0, dB=0;
+    for (let i=0;i<a.length;i++){ const x=a[i]-mA, y=b[i]-mB; num+=x*y; dA+=x*x; dB+=y*y; }
+    const den = Math.sqrt(dA*dB);
+    return den ? num/den : 0;
+  }
 
   return {
-    n_rows: series.length,
-    summary,
-    diagnosis_final: ml_prediction?.label || 'Review Recommended',
-    ml_prediction,
-    conditions: conditionsWithReasons,
-    // NOTE: keep internal timings out of response; caller wraps with response_time_ms
-    _internal_ms: elapsed
+    n_rows: n,
+    summary: {
+      left:  { mean: +mean(L).toFixed(3), std: +std(L).toFixed(3) },
+      right: { mean: +mean(R).toFixed(3), std: +std(R).toFixed(3) },
+      asymmetry_mm: +Math.abs(mean(L)-mean(R)).toFixed(3),
+      stv_bilateral: +std(L.concat(R)).toFixed(3),
+      corr_brightness: bright ? { left: +corr(L, bright).toFixed(3), right: +corr(R, bright).toFixed(3) } : null,
+      corr_depth: depth ? { left: +corr(L, depth).toFixed(3), right: +corr(R, depth).toFixed(3) } : null
+    }
   };
+}
+
+/** ── Compatibility export for legacy callers (e.g., parkinsonAnalyze.js) ── */
+export function analyzeCsvBuffer(bufferOrString) {
+  const text = Buffer.isBuffer(bufferOrString)
+    ? bufferOrString.toString('utf8')
+    : String(bufferOrString ?? '');
+  return normalizeAndSummarize(text);
 }

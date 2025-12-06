@@ -11,6 +11,8 @@ import authRouter from './routes/auth.js';
 import parkinsonAnalyze from './routes/parkinsonAnalyze.js';
 import ingestRouter from './routes/ingest.js';
 
+import { checkHealth, predict } from './services/mlClient.js';
+ 
 dotenv.config();
 
 const app = express();
@@ -41,6 +43,36 @@ app.get('/diag/env', (_req, res) => {
     ML_BASE_URL: process.env.ML_BASE_URL,
     NODE_ENV: process.env.NODE_ENV,
   });
+});
+
+app.get('/diag/ml', async (_req, res) => {
+  try {
+    const health = await checkHealth();
+
+    // quick sample using your latest summary-like numbers
+    const sample = await predict({
+      n: 240,
+      L_mean: 3.051, R_mean: 3.057,
+      L_std: 0.113,  R_std: 0.113,
+      asym: 0.006,
+      stv: 0.113,
+      corr_L_B: -0.937,
+      corr_R_B: -0.935
+    });
+
+    res.json({ health, sample });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/diag/db', async (req, res) => {
+  try {
+    const r = await req.pool.query('select now() as now');
+    res.json({ ok: true, now: r.rows[0].now });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.get(['/health', '/api/health'], (_req, res) => res.json({ ok: true }));

@@ -1,58 +1,39 @@
 // backend/services/mlClient.js
-import fetch from 'node-fetch';
+import fetchPkg from 'node-fetch';
+const fetch = globalThis.fetch || fetchPkg;
 
-const ML_BASE_URL = process.env.ML_BASE_URL || 'http://localhost:8000';
+const ML_BASE_URL = process.env.ML_BASE_URL || 'http://127.0.0.1:8000';
+const ML_SHARED_SECRET =
+  process.env.ML_SHARED_SECRET || process.env.ML_SECRET || '';
 
-/**
- * Check if ML service is alive and model is loaded
- */
 export async function checkHealth() {
   const url = `${ML_BASE_URL}/ml/health`;
   try {
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`Health check failed (${res.status})`);
-    return await res.json();
+    const txt = await res.text();
+    let data; try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+    if (!res.ok) throw new Error(`health ${res.status}: ${txt.slice(0,200)}`);
+    return data;
   } catch (err) {
-    console.error('[mlClient] Health check error:', err.message);
+    console.error('[mlClient] Health error:', err.message);
     return { ok: false, error: err.message };
   }
 }
 
-/**
- * Run ML prediction given a feature vector
- * @param {Object} feats - Feature vector (must match FeatureVector in main.py)
- * Example:
- * {
- *   n: 300,
- *   L_mean: 3.1,
- *   R_mean: 3.3,
- *   L_std: 0.05,
- *   R_std: 0.06,
- *   asym: 0.2,
- *   corr_L_B: 0.1,
- *   corr_R_B: 0.2,
- *   stv: 0.1
- * }
- */
 export async function predict(feats) {
   const url = `${ML_BASE_URL}/ml/predict`;
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(feats),
-    });
-    const text = await res.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(`Invalid JSON response: ${text.slice(0, 200)}`);
-    }
-    if (!res.ok) throw new Error(data?.detail || `Prediction failed (${res.status})`);
-    return data; // { label, proba: { ... } }
+    const headers = { 'Content-Type': 'application/json' };
+    // send a secret only if you configured one
+    if (ML_SHARED_SECRET) headers['X-ML-Secret'] = ML_SHARED_SECRET;
+
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(feats) });
+    const txt = await res.text();
+    let data; try { data = JSON.parse(txt); } catch { throw new Error(`invalid json: ${txt.slice(0,200)}`); }
+    if (!res.ok) throw new Error(`predict ${res.status}: ${txt.slice(0,200)}`);
+    return data;                   // expected: { label, proba: {...}, ... }
   } catch (err) {
     console.error('[mlClient] Prediction error:', err.message);
-    return { error: err.message };
+    return { error: err.message }; // caller will show "—"
   }
 }

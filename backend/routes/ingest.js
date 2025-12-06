@@ -1,97 +1,140 @@
 // backend/routes/ingest.js
 import express from 'express';
 import multer from 'multer';
-import path from 'node:path';
-import fs from 'node:fs/promises';
+import fs from 'fs/promises';
+import path from 'path';
+
 import { analyzeCsvBuffer } from '../services/p_analyzer.js';
+import { predict } from '../services/mlClient.js';
 
 const router = express.Router();
-const upload = multer();
+const upload = multer({ storage: multer.memoryStorage() });
 
-const nsToMs = (ns) => Number(ns) / 1e6;
+const UP_BASE = path.join(process.cwd(), 'uploads', 'csv');
+const SHARED_SECRET = process.env.SHARED_UPLOAD_TOKEN || process.env.INGEST_SECRET || '';
 
-// (optional) scrub meta identifiers
-function scrubPatientId(obj) {
-  if (!obj || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(scrubPatientId);
-  const out = {};
-  for (const [k, v] of Object.entries(obj)) {
-    const key = String(k).toLowerCase();
-    if (key === 'patientid' || key === 'patient_id' || key === 'pid') continue;
-    out[k] = scrubPatientId(v);
-  }
-  return out;
+async function ensureDir(p) {
+  await fs.mkdir(p, { recursive: true });
 }
 
-// POST /api/ingest/test  (multipart)
+function toFeatures(analysis) {
+  const s = analysis?.summary || {};
+  const L = s.left  || {};
+  const R = s.right || {};
+  return {
+    n: analysis?.n_rows ?? 0,
+    L_mean: Number(L.mean ?? 0),
+    R_mean: Number(R.mean ?? 0),
+    L_std:  Number(L.std  ?? 0),
+    R_std:  Number(R.std  ?? 0),
+    asym:   Number(s.asymmetry_mm ?? 0),
+    stv:    Number(s.stv_bilateral ?? 0),
+    corr_L_B: Number(s.corr_brightness?.left  ?? 0),
+    corr_R_B: Number(s.corr_brightness?.right ?? 0),
+  };
+}
+
+function canonicalizeConditions(proba = {}) {
+  return Object.keys(proba)
+    .map(k => ({ condition: k, confidence: Number(proba[k]) }))
+    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+}
+
+function ms(start) {
+  return Math.round(performance.now() - start);
+}
+
+async function buildResponse({ analysis, started, storedPathRel, doAnalyze }) {
+  let diagnosis_final = '—';
+  let conditions = [];
+  let reasons = [];
+  let explanations = undefined;
+  let scores = undefined;
+
+  if (doAnalyze) {
+    const feats = toFeatures(analysis);
+    const ml = await predict(feats);
+    if (!ml?.error) {
+      diagnosis_final = ml.label ?? '—';
+      conditions = canonicalizeConditions(ml.proba || {});
+      reasons = Array.isArray(ml.reasons) ? ml.reasons : [];
+      explanations = ml.explanations;
+      scores = Array.isArray(ml.scores) ? ml.scores : undefined;
+    }
+  }
+
+  const body = {
+    analysis: {
+      ...analysis,
+      diagnosis_final,
+      ...(conditions.length ? { conditions } : {}),
+      ...(reasons.length ? { reasons } : {}),
+      ...(explanations ? { explanations } : {}),
+      ...(scores ? { scores } : {}),
+    },
+    ...(storedPathRel ? { stored: { path: storedPathRel } } : {}),
+    response_time_ms: ms(started),
+  };
+
+  return body;
+}
+
+/* ----------------------- UI TEST (multipart) ----------------------- *
+ * POST /api/ingest/test?analyze=1
+ * form-data: file = <csv>
+ */
 router.post('/test', upload.single('file'), async (req, res) => {
-  const t0 = process.hrtime.bigint();
+  const started = performance.now();
   try {
-    if (!req.file) return res.status(400).json({ error: 'missing_file' });
+    if (!req.file?.buffer) return res.status(400).json({ error: 'csv_required' });
 
-    const isDebug = req.query.debug === '1' || req.get('X-Debug') === '1';
-    const analysis = await analyzeCsvBuffer(req.file.buffer, { debug: isDebug });
+    // store file (optional but nice for debugging)
+    await ensureDir(UP_BASE);
+    const fname = `test_${Date.now()}.csv`;
+    const abs = path.join(UP_BASE, fname);
+    await fs.writeFile(abs, req.file.buffer);
+    const rel = `/uploads/csv/${fname}`;
 
-    // persist (optional)
-    const fname = req.file.originalname?.replace(/\s+/g, '_') || `upload_${Date.now()}.csv`;
-    await fs.mkdir('uploads/csv', { recursive: true });
-    const outPath = path.join('uploads/csv', fname);
-    await fs.writeFile(outPath, req.file.buffer);
+    const analysis = await analyzeCsvBuffer(req.file.buffer);
+    const doAnalyze = String(req.query.analyze || '0') === '1';
 
-    const totalMs = nsToMs(process.hrtime.bigint() - t0);
-    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
-    return res.json({
-      accepted: true,
-      stored: { path: `/${outPath}`, bytes: req.file.size, contentType: req.file.mimetype || 'text/csv' },
-      response_time_ms: Number(totalMs.toFixed(1)),
-      analysis
-    });
+    const payload = await buildResponse({ analysis, started, storedPathRel: rel, doAnalyze });
+    res.set('X-Response-Time-Ms', String(payload.response_time_ms));
+    return res.json(payload);
   } catch (e) {
-    const totalMs = nsToMs(process.hrtime.bigint() - t0);
-    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
-    return res.status(500).json({
-      error: 'internal_error',
-      detail: e.message,
-      response_time_ms: Number(totalMs.toFixed(1))
-    });
+    console.error('[ingest/test]', e);
+    return res.status(500).json({ error: 'internal_error', detail: e.message, response_time_ms: ms(started) });
   }
 });
 
-// POST /api/ingest  (partner JSON, base64)
-router.post('/', express.json({ limit: '25mb' }), async (req, res) => {
-  const t0 = process.hrtime.bigint();
+/* ----------------------- PARTNER JSON (base64) ----------------------- *
+ * POST /api/ingest
+ * headers: X-Shared-Secret: <secret>
+ * body: { fileName, fileBase64, contentType: "text/csv", meta?, analyze? }
+ */
+router.post('/', express.json({ limit: '80mb' }), async (req, res) => {
+  const started = performance.now();
   try {
-    const { fileName, fileBase64, contentType = 'text/csv', meta = {}, analyze = true } = req.body || {};
-    if (!fileBase64) return res.status(400).json({ error: 'missing_fileBase64' });
+    if (SHARED_SECRET) {
+      const got = req.header('X-Shared-Secret') || '';
+      if (got !== SHARED_SECRET) return res.status(403).json({ error: 'forbidden' });
+    }
+    const { fileBase64, fileName = `upload_${Date.now()}.csv`, analyze = true } = req.body || {};
+    if (!fileBase64) return res.status(400).json({ error: 'fileBase64_required' });
 
-    const buf = Buffer.from(String(fileBase64), 'base64');
+    const raw = Buffer.from(String(fileBase64), 'base64');
+    await ensureDir(UP_BASE);
+    const abs = path.join(UP_BASE, fileName.replace(/[^a-zA-Z0-9._-]/g, '_'));
+    await fs.writeFile(abs, raw);
+    const rel = `/uploads/csv/${path.basename(abs)}`;
 
-    // save
-    await fs.mkdir('uploads/csv', { recursive: true });
-    const fname = (fileName || `upload_${Date.now()}.csv`).replace(/\s+/g, '_');
-    const outPath = path.join('uploads/csv', fname);
-    await fs.writeFile(outPath, buf);
-
-    const isDebug = req.query.debug === '1' || req.get('X-Debug') === '1';
-    const analysis = analyze ? await analyzeCsvBuffer(buf, { debug: isDebug }) : null;
-
-    const totalMs = nsToMs(process.hrtime.bigint() - t0);
-    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
-    return res.json({
-      accepted: true,
-      stored: { path: `/${outPath}`, bytes: buf.length, contentType },
-      meta: scrubPatientId(meta),
-      response_time_ms: Number(totalMs.toFixed(1)),
-      ...(analysis ? { analysis } : {})
-    });
+    const analysis = await analyzeCsvBuffer(raw);
+    const payload = await buildResponse({ analysis, started, storedPathRel: rel, doAnalyze: !!analyze });
+    res.set('X-Response-Time-Ms', String(payload.response_time_ms));
+    return res.json(payload);
   } catch (e) {
-    const totalMs = nsToMs(process.hrtime.bigint() - t0);
-    res.setHeader('X-Response-Time-Ms', totalMs.toFixed(1));
-    return res.status(500).json({
-      error: 'internal_error',
-      detail: e.message,
-      response_time_ms: Number(totalMs.toFixed(1))
-    });
+    console.error('[ingest/partner]', e);
+    return res.status(500).json({ error: 'internal_error', detail: e.message, response_time_ms: ms(started) });
   }
 });
 

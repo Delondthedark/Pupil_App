@@ -13,6 +13,69 @@ import base64
 import joblib
 import os
 
+# ------------------------------
+# (ADD) Joblib pickle compat shim
+# ------------------------------
+# This lets joblib unpickle models that reference a class that was defined
+# under "__main__.SoftVoteEnsemble" at training time.
+import sys, types  # <= only new imports besides above
+
+if "__main__" not in sys.modules:
+    sys.modules["__main__"] = types.ModuleType("__main__")
+
+class SoftVoteEnsemble:
+    """
+    Minimal pickle-friendly soft-vote wrapper for joblib compatibility.
+    Provides predict_proba/predict and tolerates various attribute names.
+    """
+    def __init__(self, estimators=None, weights=None):
+        self.estimators = estimators or []
+        self.members = self.estimators  # aliases for older pickles
+        self.models = self.estimators
+        self.weights = weights
+        self.classes_ = None
+
+    def __setstate__(self, state):
+        self.__dict__.update(state or {})
+        # normalize attribute names
+        if not hasattr(self, "estimators"):
+            if hasattr(self, "members"):
+                self.estimators = self.members
+            elif hasattr(self, "models"):
+                self.estimators = self.models
+            else:
+                self.estimators = []
+        self.members = self.estimators
+        self.models = self.estimators
+
+    def _weights_array(self, n):
+        if getattr(self, "weights", None) is None:
+            return None
+        w = np.asarray(self.weights, dtype=float)
+        return w if w.shape[0] == n else None
+
+    def predict_proba(self, X):
+        if not self.estimators:
+            raise RuntimeError("SoftVoteEnsemble has no estimators")
+        probs = [est.predict_proba(X) for est in self.estimators]
+        if self.classes_ is None and hasattr(self.estimators[0], "classes_"):
+            self.classes_ = getattr(self.estimators[0], "classes_")
+        W = self._weights_array(len(probs))
+        if W is None:
+            return np.mean(probs, axis=0)
+        W = W / (W.sum() if W.sum() else 1.0)
+        stacked = np.stack(probs, axis=0)  # (k, n, c)
+        return np.tensordot(W, stacked, axes=(0, 0))  # (n, c)
+
+    def predict(self, X):
+        proba = self.predict_proba(X)
+        idx = np.argmax(proba, axis=1)
+        classes = self.classes_ if self.classes_ is not None else np.arange(proba.shape[1])
+        return np.array([classes[i] for i in idx])
+
+# Expose the class at __main__ so pickle can resolve it
+setattr(sys.modules["__main__"], "SoftVoteEnsemble", SoftVoteEnsemble)
+
 # ==============================
 # FastAPI App Setup
 # ==============================
@@ -54,17 +117,23 @@ except Exception as e:
     pipe = None
 
 LABEL_MAP = {
-    "parkinson": "Parkinson’s",
-    "alzheimers": "Alzheimer’s",
-    "ptsd": "PTSD",
-    "stress": "High Stress",
-    "depression": "Depression",
     "adhd": "ADHD",
+    "alzheimer's": "Alzheimer’s",
+    "alzheimers": "Alzheimer’s",
+    "depression": "Depression",
+    "highstress": "High Stress",
+    "high stress": "High Stress",
+    "stress": "High Stress",
+    "ptsd": "PTSD",
+    "parkinson": "Parkinson’s",
+    "parkinsons": "Parkinson’s",
     "clear": "Clear",
     "review_recommended": "Review Recommended",
 }
+
 def normalize_label(label: str) -> str:
-    return LABEL_MAP.get(str(label).lower(), str(label).title())
+    key = str(label).strip().lower().replace("’", "'")
+    return LABEL_MAP.get(key, str(label).replace("’", "'").title())
 
 def _norm_key(s: str) -> str:
     # stable key for maps
@@ -173,11 +242,14 @@ async def eye_direction(file: UploadFile = File(...)):
             left_iris_center = get_iris_center(face_landmarks.landmark, LEFT_IRIS, (h, w))
             right_iris_center = get_iris_center(face_landmarks.landmark, RIGHT_IRIS, (h, w))
 
-            avg_vector = ((left_iris_center[0] - left_eye_center[0],
-                           left_iris_center[1] - left_eye_center[1]) +
-                          (right_iris_center[0] - right_eye_center[0],
-                           right_iris_center[1] - right_eye_center[1])) / 2
-            dx, dy = avg_vector
+            # Average the two iris-to-eye-center vectors
+            lv = (left_iris_center[0] - left_eye_center[0],
+                  left_iris_center[1] - left_eye_center[1])
+            rv = (right_iris_center[0] - right_eye_center[0],
+                  right_iris_center[1] - right_eye_center[1])
+            dx = (lv[0] + rv[0]) / 2.0
+            dy = (lv[1] + rv[1]) / 2.0
+
             if abs(dx) < 5 and abs(dy) < 5:
                 direction = "forward"
             elif abs(dx) > abs(dy):
@@ -235,7 +307,7 @@ def ml_predict(feats: FeatureVector) -> Dict:
         top_conf = float(proba_map.get(top_condition, 0.0))
         reasons = derive_reasons(feats, top_condition, top_conf)
 
-        # Optional: provide per-class scores array with inline reasons for the top one
+        # Per-class scores with reasons attached to the top one
         scores = []
         for c_raw, p in zip(pipe.classes_, proba):
             c_norm = normalize_label(c_raw)
@@ -247,12 +319,10 @@ def ml_predict(feats: FeatureVector) -> Dict:
         return {
             "label": label,
             "proba": proba_map,
-            "top_condition": top_condition,       # NEW
-            "reasons": reasons,                   # NEW (for top condition)
-            "explanations": {                     # NEW (map for easy lookup)
-                _norm_key(top_condition): reasons
-            },
-            "scores": scores                      # NEW (array; top includes reasons)
+            "top_condition": top_condition,
+            "reasons": reasons,
+            "explanations": { _norm_key(top_condition): reasons },
+            "scores": scores
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Prediction failed: {e}")
@@ -266,7 +336,7 @@ def ml_health():
     except Exception:
         pass
     return {
-        "ok": True,
+        "ok": True if pipe is not None else False,
         "model_loaded": pipe is not None,
         "model_path": MODEL_PATH,
         "exists": os.path.exists(MODEL_PATH),

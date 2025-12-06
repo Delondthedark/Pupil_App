@@ -16,7 +16,8 @@ ai-service/.env
 ai-service/.pytest_cache/
 ai-service/.mypy_cache/
 *.py[cod]
-
+ai-service/data/
+ai-service/test_csvs_augmented/
 # VSCode & MacOS
 .vscode/
 .DS_Store
